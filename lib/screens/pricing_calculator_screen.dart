@@ -2,12 +2,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state_provider.dart';
-import '../models/pricing_model.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
-import '../widgets/app_card.dart';
-import '../widgets/app_button.dart';
-import '../widgets/currency_text.dart';
 
 class PricingCalculatorScreen extends StatefulWidget {
   const PricingCalculatorScreen({super.key});
@@ -17,505 +13,488 @@ class PricingCalculatorScreen extends StatefulWidget {
 }
 
 class _PricingCalculatorScreenState extends State<PricingCalculatorScreen> {
-  void _showAddItemModal(BuildContext context) {
-    final appState = Provider.of<AppStateProvider>(context, listen: false);
-    final nameCtrl = TextEditingController();
-    final costCtrl = TextEditingController(text: '15.0');
-    final qtyCtrl = TextEditingController(text: '1');
-    final unitCtrl = TextEditingController(text: 'pc');
-
-    showCupertinoDialog(
-      context: context,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: const Text(
-          'Add Cost Item',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 12.0),
-          child: Column(
-            children: [
-              CupertinoTextField(
-                controller: nameCtrl,
-                placeholder: 'Item Name (e.g. Pork / Packaging)',
-              ),
-              const SizedBox(height: 8.0),
-              CupertinoTextField(
-                controller: costCtrl,
-                placeholder: 'Unit Cost in PHP (₱)',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-              const SizedBox(height: 8.0),
-              Row(
-                children: [
-                  Expanded(
-                    child: CupertinoTextField(
-                      controller: qtyCtrl,
-                      placeholder: 'Batch Qty',
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                  ),
-                  const SizedBox(width: 8.0),
-                  Expanded(
-                    child: CupertinoTextField(
-                      controller: unitCtrl,
-                      placeholder: 'Unit (kg/pc)',
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.pop(ctx),
-          ),
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            onPressed: () {
-              if (nameCtrl.text.isNotEmpty) {
-                appState.addMaterialItem(
-                  MaterialItem(
-                    id: 'm_${DateTime.now().millisecondsSinceEpoch}',
-                    name: nameCtrl.text,
-                    unitCost: double.tryParse(costCtrl.text) ?? 10.0,
-                    quantityPerBatch: double.tryParse(qtyCtrl.text) ?? 1.0,
-                    unit: unitCtrl.text.isEmpty ? 'pc' : unitCtrl.text,
-                  ),
-                );
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('Add Item'),
-          ),
-        ],
-      ),
-    );
-  }
+  double _targetMargin = 0.35; // 35% default matching mockup
 
   @override
   Widget build(BuildContext context) {
     final appState = Provider.of<AppStateProvider>(context);
-    final calc = appState.pricingCalculation;
+    final items = appState.pricingItems;
 
-    return CupertinoPageScaffold(
-      backgroundColor: AppColors.background, // Warm Parchment #F6F1E9
-      child: CustomScrollView(
-        slivers: [
-          // iOS Navigation Header
-          CupertinoSliverNavigationBar(
-            largeTitle: Text(
-              'Pricing',
-              style: AppTypography.largeTitle(),
-            ),
-            backgroundColor: AppColors.background.withValues(alpha: 0.90),
-            border: null,
-            trailing: CupertinoButton(
-              padding: EdgeInsets.zero,
-              onPressed: () => _showAddItemModal(context),
-              child: const Icon(CupertinoIcons.add_circled_solid, color: AppColors.aubergine, size: 26.0),
-            ),
-          ),
+    final totalCost = appState.totalIngredientsCost;
+    final suggestedPrice = (totalCost / (1.0 - _targetMargin)).roundToDouble();
+    final profitPerServing = suggestedPrice - totalCost;
 
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 12.0, bottom: 100.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top Bar Header with Bell Button
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Cost Sheet & Margin Calculator • ${calc.productName}',
-                    style: AppTypography.caption(color: AppColors.textMuted),
-                  ),
-                  const SizedBox(height: 14.0),
-
-                  // 1. Hero Summary Card (Aubergine #4A154B)
-                  AppCard(
-                    backgroundColor: AppColors.aubergine,
-                    borderColor: AppColors.aubergine,
-                    child: Column(
-                      children: [
-                        const Text(
-                          'SUGGESTED SELLING PRICE PER UNIT',
-                          style: TextStyle(
-                            fontSize: 11.0,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.8,
-                            color: Colors.white70,
-                          ),
-                        ),
-                        const SizedBox(height: 6.0),
-                        CurrencyText(
-                          amount: calc.suggestedUnitPrice,
-                          fontSize: 38.0,
-                          color: AppColors.yellow,
-                        ),
-                        const SizedBox(height: 16.0),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(16.0),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: [
-                              _MetricCol(label: 'Unit Cost', amount: calc.unitCost),
-                              _MetricCol(label: 'Unit Profit', amount: calc.unitProfit),
-                              _MetricCol(
-                                label: 'Gross Margin',
-                                customText: '${calc.grossMarginPercent.toStringAsFixed(1)}%',
-                                textColor: calc.isMarginCritical ? AppColors.pinkRed : AppColors.green,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 2. Interactive Target Margin Range Slider Card
-                  AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Target Gross Profit Margin',
-                              style: TextStyle(
-                                fontSize: 15.0,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textDark,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-                              decoration: BoxDecoration(
-                                color: calc.isMarginCritical
-                                    ? AppColors.pinkRedTint
-                                    : AppColors.greenTint,
-                                borderRadius: BorderRadius.circular(12.0),
-                              ),
-                              child: Text(
-                                '${calc.targetMarginPercent.toStringAsFixed(0)}%',
-                                style: TextStyle(
-                                  fontSize: 13.0,
-                                  fontWeight: FontWeight.bold,
-                                  color: calc.isMarginCritical ? AppColors.pinkRed : AppColors.green,
-                                ),
-                              ),
+                  const SizedBox(),
+                  Stack(
+                    children: [
+                      Container(
+                        width: 40.0,
+                        height: 40.0,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 10.0,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10.0),
-
-                        CupertinoSlider(
-                          value: calc.targetMarginPercent,
-                          min: 10.0,
-                          max: 70.0,
-                          divisions: 60,
-                          activeColor: calc.isMarginCritical ? AppColors.pinkRed : AppColors.green,
-                          thumbColor: AppColors.yellow,
-                          onChanged: (val) {
-                            appState.updatePricingField(targetMarginPercent: val);
-                          },
+                        child: const Icon(
+                          CupertinoIcons.bell,
+                          size: 20.0,
+                          color: AppColors.textDark,
                         ),
+                      ),
+                      Positioned(
+                        top: 8.0,
+                        right: 8.0,
+                        child: Container(
+                          width: 8.0,
+                          height: 8.0,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFEF4444),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
 
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('10% (Low)', style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
-                              Text('35% (Healthy)', style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
-                              Text('70% (High)', style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
-                            ],
+              const SizedBox(height: 4.0),
+
+              // Title & Subtitle
+              Text(
+                'Pricing',
+                style: AppTypography.largeTitle(),
+              ),
+              const SizedBox(height: 4.0),
+              const Text(
+                'Pork Silog · per serving',
+                style: TextStyle(
+                  fontSize: 14.0,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+
+              const SizedBox(height: 20.0),
+
+              // Dark Purple Hero Price Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(22.0),
+                decoration: BoxDecoration(
+                  color: AppColors.aubergine,
+                  borderRadius: BorderRadius.circular(24.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.aubergine.withValues(alpha: 0.25),
+                      blurRadius: 20.0,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Suggested selling price',
+                      style: TextStyle(
+                        fontSize: 13.0,
+                        color: Color(0xFFD8B4FE),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4.0),
+                    Text(
+                      '₱${suggestedPrice.toInt()}',
+                      style: const TextStyle(
+                        fontSize: 42.0,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: -1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 20.0),
+
+                    // Side-by-Side Dark Translucent Sub-Cards
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3B123A),
+                              borderRadius: BorderRadius.circular(16.0),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Total cost',
+                                  style: TextStyle(
+                                    fontSize: 12.0,
+                                    color: Color(0xFFE2D9EC),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4.0),
+                                Text(
+                                  '₱${totalCost.toInt()}',
+                                  style: const TextStyle(
+                                    fontSize: 22.0,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12.0),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3B123A),
+                              borderRadius: BorderRadius.circular(16.0),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Profit / serving',
+                                  style: TextStyle(
+                                    fontSize: 12.0,
+                                    color: Color(0xFFE2D9EC),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 4.0),
+                                Text(
+                                  '₱${profitPerServing.toInt()}',
+                                  style: const TextStyle(
+                                    fontSize: 22.0,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFFFBBF24),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  ),
+                  ],
+                ),
+              ),
 
-                  const SizedBox(height: 16.0),
+              const SizedBox(height: 16.0),
 
-                  // 3. AI Margin Health Advisor Banner
-                  AppCard(
-                    backgroundColor: calc.isMarginCritical ? AppColors.pinkRedTint : AppColors.greenTint,
-                    borderColor: calc.isMarginCritical
-                        ? AppColors.pinkRed.withValues(alpha: 0.3)
-                        : AppColors.green.withValues(alpha: 0.3),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              // Target Margin Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12.0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(6.0),
-                          decoration: BoxDecoration(
-                            color: calc.isMarginCritical ? AppColors.pinkRed : AppColors.green,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            calc.isMarginCritical
-                                ? CupertinoIcons.exclamationmark_triangle_fill
-                                : CupertinoIcons.checkmark_seal_fill,
-                            size: 16.0,
-                            color: Colors.white,
+                        const Text(
+                          'Target margin',
+                          style: TextStyle(
+                            fontSize: 16.0,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textDark,
                           ),
                         ),
-                        const SizedBox(width: 10.0),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 5.0),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDCFCE7),
+                            borderRadius: BorderRadius.circular(14.0),
+                          ),
+                          child: Text(
+                            '${(_targetMargin * 100).toInt()}%',
+                            style: const TextStyle(
+                              fontSize: 13.0,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF16A34A),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12.0),
+                    SliderTheme(
+                      data: SliderThemeData(
+                        trackHeight: 8.0,
+                        activeTrackColor: const Color(0xFF38A169),
+                        inactiveTrackColor: const Color(0xFF374151),
+                        thumbColor: const Color(0xFF38A169),
+                        overlayColor: const Color(0xFF38A169).withValues(alpha: 0.2),
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10.0),
+                      ),
+                      child: Slider(
+                        value: _targetMargin,
+                        min: 0.10,
+                        max: 0.70,
+                        onChanged: (val) {
+                          setState(() => _targetMargin = val);
+                        },
+                      ),
+                    ),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '10%',
+                          style: TextStyle(fontSize: 12.0, color: AppColors.textMuted),
+                        ),
+                        Text(
+                          '70%',
+                          style: TextStyle(fontSize: 12.0, color: AppColors.textMuted),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16.0),
+
+              // Light Blue AI Suggestion Card
+              Container(
+                padding: const EdgeInsets.all(18.0),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE0F2FE),
+                  borderRadius: BorderRadius.circular(20.0),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38.0,
+                      height: 38.0,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          CupertinoIcons.sparkles,
+                          size: 18.0,
+                          color: Color(0xFF0284C7),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14.0),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Likhora AI · Suggestion',
+                            style: TextStyle(
+                              fontSize: 14.0,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0284C7),
+                            ),
+                          ),
+                          SizedBox(height: 4.0),
+                          Text(
+                            'Beginner carinderias in Pasig average ₱18–₱24 profit per silog. You\'re in a healthy range — you can round up to ₱75 cleanly.',
+                            style: TextStyle(
+                              fontSize: 13.0,
+                              color: Color(0xFF334155),
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 28.0),
+
+              // Section: Cost breakdown
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Cost breakdown',
+                    style: TextStyle(
+                      fontSize: 20.0,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () {},
+                    child: const Text(
+                      'Add item',
+                      style: TextStyle(
+                        fontSize: 14.0,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.aubergine,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 14.0),
+
+              // Breakdown Items List
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: items.length,
+                separatorBuilder: (ctx, idx) => const SizedBox(height: 10.0),
+                itemBuilder: (ctx, idx) {
+                  final item = items[idx];
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18.0),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 8.0,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 42.0,
+                          height: 42.0,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE0F2FE),
+                            borderRadius: BorderRadius.circular(12.0),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              CupertinoIcons.cube_box,
+                              size: 20.0,
+                              color: Color(0xFF0284C7),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12.0),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                calc.isMarginCritical
-                                    ? 'Thin Profit Margin Alert'
-                                    : 'Healthy Business Margin',
-                                style: TextStyle(
-                                  fontSize: 13.0,
+                                item.name,
+                                style: const TextStyle(
+                                  fontSize: 15.0,
                                   fontWeight: FontWeight.bold,
-                                  color: calc.isMarginCritical ? AppColors.pinkRed : AppColors.green,
+                                  color: AppColors.textDark,
                                 ),
                               ),
-                              const SizedBox(height: 4.0),
-                              Text(
-                                calc.isMarginCritical
-                                    ? 'Margin is below 25%. Switch to Divisoria Packaging Hub to save ₱1.50 per cup and raise your margin to 38%.'
-                                    : 'Margin is strong at ${calc.grossMarginPercent.toStringAsFixed(0)}%. Round unit price to ₱${calc.suggestedUnitPrice.ceil()} for clean cash transactions.',
-                                style: const TextStyle(fontSize: 12.5, color: AppColors.textDark, height: 1.35),
-                              ),
-                              if (calc.isMarginCritical) ...[
-                                const SizedBox(height: 8.0),
-                                GestureDetector(
-                                  onTap: () => appState.setTabIndex(4), // Jump to Suppliers
-                                  child: const Row(
-                                    children: [
-                                      Text(
-                                        'Find cheaper suppliers →',
-                                        style: TextStyle(
-                                          fontSize: 12.0,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColors.pinkRed,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                              const SizedBox(height: 2.0),
+                              const Text(
+                                'Materials',
+                                style: TextStyle(
+                                  fontSize: 12.0,
+                                  color: AppColors.textMuted,
                                 ),
-                              ],
+                              ),
                             ],
                           ),
                         ),
+                        Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () {
+                                if (item.unitCost > 5) {
+                                  appState.updateIngredientCost(item.id, item.unitCost - 5.0);
+                                }
+                              },
+                              child: Container(
+                                width: 28.0,
+                                height: 28.0,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFF3F4F6),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Center(
+                                  child: Icon(CupertinoIcons.minus, size: 14.0, color: AppColors.textDark),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8.0),
+                            Text(
+                              '₱${item.unitCost.toInt()}',
+                              style: const TextStyle(
+                                fontSize: 15.0,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                            const SizedBox(width: 8.0),
+                            GestureDetector(
+                              onTap: () {
+                                appState.updateIngredientCost(item.id, item.unitCost + 5.0);
+                              },
+                              child: Container(
+                                width: 28.0,
+                                height: 28.0,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFF3E8FF),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Center(
+                                  child: Icon(CupertinoIcons.plus, size: 14.0, color: AppColors.aubergine),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 4. Batch Parameters Control Card
-                  AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Batch Production Parameters',
-                          style: TextStyle(fontSize: 15.0, fontWeight: FontWeight.bold, color: AppColors.textDark),
-                        ),
-                        const SizedBox(height: 12.0),
-
-                        _InputRow(
-                          label: 'Batch Yield Output (Servings/Units)',
-                          value: '${calc.batchYield}',
-                          onChanged: (val) {
-                            final i = int.tryParse(val);
-                            if (i != null && i > 0) {
-                              appState.updatePricingField(batchYield: i);
-                            }
-                          },
-                        ),
-                        const Divider(color: AppColors.hairlineBorder),
-                        _InputRow(
-                          label: 'Labor Hours Per Batch',
-                          value: calc.laborHoursPerBatch.toStringAsFixed(1),
-                          onChanged: (val) {
-                            final d = double.tryParse(val);
-                            if (d != null) {
-                              appState.updatePricingField(laborHoursPerBatch: d);
-                            }
-                          },
-                        ),
-                        const Divider(color: AppColors.hairlineBorder),
-                        _InputRow(
-                          label: 'Hourly Labor Rate (₱/hr)',
-                          value: calc.hourlyLaborRate.toStringAsFixed(0),
-                          onChanged: (val) {
-                            final d = double.tryParse(val);
-                            if (d != null) {
-                              appState.updatePricingField(hourlyLaborRate: d);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 5. Raw Materials & Ingredients List Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Ingredients & Cost Items (${calc.materials.length})',
-                        style: const TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold, color: AppColors.textDark),
-                      ),
-                      CupertinoButton(
-                        padding: EdgeInsets.zero,
-                        onPressed: () => _showAddItemModal(context),
-                        child: const Text(
-                          'Add Item',
-                          style: TextStyle(fontSize: 13.0, fontWeight: FontWeight.bold, color: AppColors.aubergine),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10.0),
-
-                  // Ingredients List
-                  ...calc.materials.map((item) {
-                    return AppCard(
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8.0),
-                            decoration: BoxDecoration(
-                              color: AppColors.yellowTint,
-                              borderRadius: BorderRadius.circular(14.0),
-                            ),
-                            child: const Icon(CupertinoIcons.cube_box_fill, color: AppColors.yellow, size: 20.0),
-                          ),
-                          const SizedBox(width: 12.0),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.name,
-                                  style: const TextStyle(
-                                    fontSize: 14.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.textDark,
-                                  ),
-                                ),
-                                Text(
-                                  '₱${item.unitCost.toStringAsFixed(2)} / ${item.unit} • Qty: ${item.quantityPerBatch.toStringAsFixed(1)}',
-                                  style: const TextStyle(fontSize: 12.0, color: AppColors.textMuted),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          // Monospace Currency Amount
-                          CurrencyText(amount: item.totalCost, fontSize: 14.5),
-
-                          const SizedBox(width: 8.0),
-
-                          GestureDetector(
-                            onTap: () => appState.removeMaterialItem(item.id),
-                            child: const Icon(CupertinoIcons.minus_circle_fill, color: AppColors.pinkRed, size: 20.0),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-
-                  const SizedBox(height: 80.0),
-                ],
+                  );
+                },
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricCol extends StatelessWidget {
-  final String label;
-  final double? amount;
-  final String? customText;
-  final Color textColor;
-
-  const _MetricCol({
-    required this.label,
-    this.amount,
-    this.customText,
-    this.textColor = Colors.white,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(label, style: const TextStyle(fontSize: 11.0, color: Colors.white70)),
-        const SizedBox(height: 2.0),
-        customText != null
-            ? Text(customText!, style: TextStyle(fontSize: 14.0, fontWeight: FontWeight.bold, color: textColor))
-            : CurrencyText(amount: amount ?? 0.0, fontSize: 14.0, color: textColor),
-      ],
-    );
-  }
-}
-
-class _InputRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  const _InputRow({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 13.0, color: AppColors.textDark, fontWeight: FontWeight.w500),
-            ),
-          ),
-          SizedBox(
-            width: 72.0,
-            height: 32.0,
-            child: CupertinoTextField(
-              controller: TextEditingController(text: value),
-              textAlign: TextAlign.right,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.bold,
-                color: AppColors.aubergine,
-              ),
-              decoration: BoxDecoration(
-                color: AppColors.background,
-                borderRadius: BorderRadius.circular(8.0),
-                border: Border.all(color: AppColors.hairlineBorder),
-              ),
-              onChanged: onChanged,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

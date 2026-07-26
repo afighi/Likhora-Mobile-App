@@ -51,6 +51,9 @@ class AppStateProvider extends ChangeNotifier {
   UserProfile? get currentUserProfile => _currentUserProfile;
   List<RoadmapStep> get roadmapSteps => _roadmapSteps;
   PricingCalculation get pricingCalculation => _pricingCalculation;
+  List<MaterialItem> get pricingItems => _pricingCalculation.materials;
+  double get totalIngredientsCost =>
+      _pricingCalculation.materials.fold(0.0, (sum, m) => sum + m.unitCost);
   List<Supplier> get suppliers => _suppliers;
   String get supplierSearchQuery => _supplierSearchQuery;
   String get selectedSupplierCategory => _selectedSupplierCategory;
@@ -209,6 +212,14 @@ class AppStateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateIngredientCost(String id, double newCost) {
+    final idx = _pricingCalculation.materials.indexWhere((m) => m.id == id);
+    if (idx != -1) {
+      _pricingCalculation.materials[idx].unitCost = newCost.clamp(1.0, 999.0);
+      notifyListeners();
+    }
+  }
+
   void addMaterialItem(MaterialItem item) {
     _pricingCalculation.materials.add(item);
     notifyListeners();
@@ -253,17 +264,17 @@ class AppStateProvider extends ChangeNotifier {
     _pricingCalculation = PricingCalculation(
       id: 'calc_1',
       userId: 'usr_1',
-      productName: 'Artisan Milk Tea (500ml)',
+      productName: 'Pork Silog',
       materials: [
-        MaterialItem(id: 'm1', name: 'Tea Leaves & Concentrates', unitCost: 14.50, quantityPerBatch: 1, unit: 'portion'),
-        MaterialItem(id: 'm2', name: 'Boba Pearls & Syrups', unitCost: 8.00, quantityPerBatch: 1, unit: 'portion'),
-        MaterialItem(id: 'm3', name: 'Custom Seal Cups & Straws', unitCost: 6.50, quantityPerBatch: 1, unit: 'pc'),
+        MaterialItem(id: 'm1', name: 'Pork (per serving)', unitCost: 32.0, quantityPerBatch: 1, unit: 'serving'),
+        MaterialItem(id: 'm2', name: 'Rice (per serving)', unitCost: 12.0, quantityPerBatch: 1, unit: 'serving'),
+        MaterialItem(id: 'm3', name: 'Cooking Oil & Spices', unitCost: 29.0, quantityPerBatch: 1, unit: 'portion'),
       ],
       hourlyLaborRate: 65.0,
       laborHoursPerBatch: 2.0,
-      monthlyOverheadAllocation: 2500.0,
-      batchYield: 25,
-      targetMarginPercent: 45.0,
+      monthlyOverheadAllocation: 0.0,
+      batchYield: 1,
+      targetMarginPercent: 35.0,
       createdAt: DateTime.now(),
     );
 

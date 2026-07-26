@@ -4,9 +4,6 @@ import 'package:provider/provider.dart';
 import '../providers/app_state_provider.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
-import '../widgets/app_card.dart';
-import '../widgets/app_button.dart';
-import 'launch_package_modal.dart';
 
 class ProgressTrackerScreen extends StatelessWidget {
   const ProgressTrackerScreen({super.key});
@@ -15,395 +12,482 @@ class ProgressTrackerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final appState = Provider.of<AppStateProvider>(context);
 
-    return CupertinoPageScaffold(
-      backgroundColor: AppColors.background, // Warm Parchment #F6F1E9
-      child: CustomScrollView(
-        slivers: [
-          // iOS Large Title Header
-          CupertinoSliverNavigationBar(
-            largeTitle: Text(
-              'Progress',
-              style: AppTypography.largeTitle(),
-            ),
-            backgroundColor: AppColors.background.withValues(alpha: 0.90),
-            border: null,
-          ),
-
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 12.0, bottom: 100.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with Bell Icon
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Carinderia sa Pasig • Launch Readiness Tracker',
-                    style: AppTypography.caption(color: AppColors.textMuted),
-                  ),
-                  const SizedBox(height: 14.0),
-
-                  // 1. Overall Progress Hero Ring Card
-                  AppCard(
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            // Large Green Completion Ring
-                            SizedBox(
-                              width: 72.0,
-                              height: 72.0,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  CircularProgressIndicator(
-                                    value: appState.overallProgressPercent,
-                                    strokeWidth: 8.0,
-                                    backgroundColor: AppColors.dividerColor,
-                                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.green),
-                                  ),
-                                  Text(
-                                    '${(appState.overallProgressPercent * 100).toInt()}%',
-                                    style: const TextStyle(
-                                      fontSize: 16.0,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.textDark,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 16.0),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Overall Launch Readiness',
-                                    style: TextStyle(
-                                      fontSize: 17.0,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.textDark,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4.0),
-                                  Text(
-                                    '${appState.completedStepsCount} of ${appState.totalStepsCount} roadmap steps completed',
-                                    style: const TextStyle(
-                                      fontSize: 13.0,
-                                      color: AppColors.textMuted,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                  const SizedBox(),
+                  Stack(
+                    children: [
+                      Container(
+                        width: 40.0,
+                        height: 40.0,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.05),
+                              blurRadius: 10.0,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 2. AI Next-Step Guidance Panel
-                  AppCard(
-                    backgroundColor: AppColors.blueTint,
-                    borderColor: AppColors.blue.withValues(alpha: 0.3),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(6.0),
+                        child: const Icon(
+                          CupertinoIcons.bell,
+                          size: 20.0,
+                          color: AppColors.textDark,
+                        ),
+                      ),
+                      Positioned(
+                        top: 8.0,
+                        right: 8.0,
+                        child: Container(
+                          width: 8.0,
+                          height: 8.0,
                           decoration: const BoxDecoration(
-                            color: AppColors.blue,
+                            color: Color(0xFFEF4444),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(CupertinoIcons.sparkles, size: 16.0, color: Colors.white),
                         ),
-                        const SizedBox(width: 10.0),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 4.0),
+
+              // Title & Subtitle
+              Text(
+                'Progress',
+                style: AppTypography.largeTitle(),
+              ),
+              const SizedBox(height: 4.0),
+              const Text(
+                'Your launch-ready toolkit',
+                style: TextStyle(
+                  fontSize: 14.0,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+
+              const SizedBox(height: 20.0),
+
+              // Top White Card with Circular Green Progress Ring
+              Container(
+                padding: const EdgeInsets.all(20.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 14.0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    // Green Progress Ring
+                    SizedBox(
+                      width: 72.0,
+                      height: 72.0,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 72.0,
+                            height: 72.0,
+                            child: CircularProgressIndicator(
+                              value: 0.40,
+                              strokeWidth: 8.0,
+                              backgroundColor: const Color(0xFFE5E7EB),
+                              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF38A169)),
+                              strokeCap: StrokeCap.round,
+                            ),
+                          ),
+                          const Text(
+                            '40%',
+                            style: TextStyle(
+                              fontSize: 15.0,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(width: 18.0),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'You\'re getting there',
+                            style: TextStyle(
+                              fontSize: 18.0,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 4.0),
+                          const Text(
+                            '2 of 5 roadmap steps complete. Finish 3 more to unlock your launch checklist.',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.textMuted,
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 12.0),
+                          Row(
                             children: [
-                              Text(
-                                'AI Next-Step Guidance',
-                                style: TextStyle(
-                                  fontSize: 13.0,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textDark,
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDCFCE7),
+                                  borderRadius: BorderRadius.circular(12.0),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(CupertinoIcons.checkmark, size: 12.0, color: Color(0xFF16A34A)),
+                                    SizedBox(width: 4.0),
+                                    Text(
+                                      '2 done',
+                                      style: TextStyle(
+                                        fontSize: 12.0,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF16A34A),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              SizedBox(height: 4.0),
-                              Text(
-                                'Completing "Costing & Profit Margin Calculation" will unlock your Launch Price List and generate your final Business Portfolio.',
-                                style: TextStyle(fontSize: 12.5, color: AppColors.textDark, height: 1.35),
+                              const SizedBox(width: 8.0),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(12.0),
+                                ),
+                                child: const Text(
+                                  '1 active',
+                                  style: TextStyle(
+                                    fontSize: 12.0,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFD97706),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 3. Weekly Activity Lightweight Bar Chart Card
-                  AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Weekly Negosyo Activity',
-                          style: TextStyle(
-                            fontSize: 15.0,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textDark,
-                          ),
-                        ),
-                        const SizedBox(height: 14.0),
-                        const Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            _DayBar(day: 'M', height: 28, isCompleted: true),
-                            _DayBar(day: 'T', height: 44, isCompleted: true),
-                            _DayBar(day: 'W', height: 18, isCompleted: true),
-                            _DayBar(day: 'T', height: 56, isCompleted: true, isActive: true),
-                            _DayBar(day: 'F', height: 10, isCompleted: false),
-                            _DayBar(day: 'S', height: 10, isCompleted: false),
-                            _DayBar(day: 'S', height: 10, isCompleted: false),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 4. Launch Toolkit Deliverables
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 6.0),
-                    child: Text(
-                      'Tangible Launch Deliverables',
-                      style: TextStyle(
-                        fontSize: 16.0,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textDark,
-                      ),
-                    ),
-                  ),
-
-                  _DeliverableCard(
-                    title: 'Product Cost Sheet',
-                    statusText: '100% Calculated',
-                    progress: 1.0,
-                    icon: CupertinoIcons.doc_text_fill,
-                    iconColor: AppColors.yellow,
-                  ),
-
-                  _DeliverableCard(
-                    title: 'Chosen Supply Partners',
-                    statusText: '2 Suppliers Matched',
-                    progress: 0.66,
-                    icon: CupertinoIcons.building_2_fill,
-                    iconColor: AppColors.blue,
-                  ),
-
-                  _DeliverableCard(
-                    title: 'Launch Price List',
-                    statusText: 'Ready to Print',
-                    progress: 1.0,
-                    icon: CupertinoIcons.tag_fill,
-                    iconColor: AppColors.green,
-                  ),
-
-                  const SizedBox(height: 16.0),
-
-                  // 5. Aubergine Milestone Launch Card
-                  AppCard(
-                    backgroundColor: AppColors.aubergine,
-                    borderColor: AppColors.aubergine,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(CupertinoIcons.flag_fill, color: AppColors.yellow, size: 20.0),
-                            const SizedBox(width: 8.0),
-                            const Text(
-                              'Target Launch Date',
-                              style: TextStyle(
-                                fontSize: 13.0,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white70,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-                              decoration: BoxDecoration(
-                                color: AppColors.green,
-                                borderRadius: BorderRadius.circular(12.0),
-                              ),
-                              child: const Text(
-                                'On Track',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10.0),
-                        const Text(
-                          'August 15, 2026',
-                          style: TextStyle(
-                            fontSize: 22.0,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 14.0),
-                        AppButton(
-                          label: 'Export Business Portfolio',
-                          icon: CupertinoIcons.share,
-                          onPressed: () {
-                            showCupertinoModalPopup(
-                              context: context,
-                              builder: (ctx) => const LaunchPackageModal(),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 80.0),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DayBar extends StatelessWidget {
-  final String day;
-  final double height;
-  final bool isCompleted;
-  final bool isActive;
-
-  const _DayBar({
-    required this.day,
-    required this.height,
-    required this.isCompleted,
-    this.isActive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 18.0,
-          height: height,
-          decoration: BoxDecoration(
-            color: isActive
-                ? AppColors.yellow
-                : (isCompleted ? AppColors.green : AppColors.dividerColor),
-            borderRadius: BorderRadius.circular(6.0),
-          ),
-        ),
-        const SizedBox(height: 6.0),
-        Text(
-          day,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-            color: isActive ? AppColors.aubergine : AppColors.textMuted,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DeliverableCard extends StatelessWidget {
-  final String title;
-  final String statusText;
-  final double progress;
-  final IconData icon;
-  final Color iconColor;
-
-  const _DeliverableCard({
-    required this.title,
-    required this.statusText,
-    required this.progress,
-    required this.icon,
-    required this.iconColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8.0),
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(14.0),
-                ),
-                child: Icon(icon, color: iconColor, size: 20.0),
-              ),
-              const SizedBox(width: 12.0),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textDark,
-                      ),
-                    ),
-                    Text(
-                      statusText,
-                      style: const TextStyle(
-                        fontSize: 12.0,
-                        color: AppColors.textMuted,
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-              Text(
-                '${(progress * 100).toInt()}%',
-                style: const TextStyle(
-                  fontSize: 13.0,
+
+              const SizedBox(height: 16.0),
+
+              // Soft Muted Purple Banner ("What's next & why")
+              Container(
+                padding: const EdgeInsets.all(18.0),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFE9EB),
+                  borderRadius: BorderRadius.circular(20.0),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38.0,
+                      height: 38.0,
+                      decoration: BoxDecoration(
+                        color: AppColors.aubergine.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          CupertinoIcons.sparkles,
+                          size: 18.0,
+                          color: AppColors.aubergine,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14.0),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'What\'s next & why',
+                            style: TextStyle(
+                              fontSize: 14.0,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.aubergine,
+                            ),
+                          ),
+                          SizedBox(height: 4.0),
+                          Text(
+                            'Costing your last 2 dishes now unlocks the price list — the final deliverable before you can print your launch menu.',
+                            style: TextStyle(
+                              fontSize: 13.0,
+                              color: Color(0xFF4A4050),
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 28.0),
+
+              // Section: This week
+              const Text(
+                'This week',
+                style: TextStyle(
+                  fontSize: 20.0,
                   fontWeight: FontWeight.bold,
-                  color: AppColors.aubergine,
+                  color: AppColors.textDark,
+                  letterSpacing: -0.4,
+                ),
+              ),
+
+              const SizedBox(height: 14.0),
+
+              // Weekly Activity Tracker Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 10.0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 50.0), // Activity area spacer
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: const [
+                        Text('M', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('T', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('W', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('T', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('F', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('S', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                        Text('S', style: TextStyle(fontSize: 12.0, color: AppColors.textMuted, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 28.0),
+
+              // Section: Launch toolkit
+              const Text(
+                'Launch toolkit',
+                style: TextStyle(
+                  fontSize: 20.0,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark,
+                  letterSpacing: -0.4,
+                ),
+              ),
+
+              const SizedBox(height: 14.0),
+
+              // Toolkit Item 1: Cost sheet
+              Container(
+                padding: const EdgeInsets.all(18.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 10.0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 44.0,
+                          height: 44.0,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(14.0),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              CupertinoIcons.doc_text_fill,
+                              size: 22.0,
+                              color: Color(0xFFD97706),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14.0),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                'Cost sheet',
+                                style: TextStyle(
+                                  fontSize: 16.0,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              SizedBox(height: 2.0),
+                              Text(
+                                '6 of 8 dishes costed',
+                                style: TextStyle(
+                                  fontSize: 13.0,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Text(
+                          '75%',
+                          style: TextStyle(
+                            fontSize: 15.0,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFD97706),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14.0),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4.0),
+                      child: LinearProgressIndicator(
+                        value: 0.75,
+                        minHeight: 6.0,
+                        backgroundColor: const Color(0xFFFEF3C7),
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFD97706)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12.0),
+
+              // Toolkit Item 2: Chosen suppliers
+              Container(
+                padding: const EdgeInsets.all(18.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20.0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 10.0,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 44.0,
+                          height: 44.0,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE0F2FE),
+                            borderRadius: BorderRadius.circular(14.0),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              CupertinoIcons.house_alt_fill,
+                              size: 22.0,
+                              color: Color(0xFF0284C7),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14.0),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: const [
+                              Text(
+                                'Chosen suppliers',
+                                style: TextStyle(
+                                  fontSize: 16.0,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              SizedBox(height: 2.0),
+                              Text(
+                                '3 of 3 suppliers saved',
+                                style: TextStyle(
+                                  fontSize: 13.0,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Text(
+                          '100%',
+                          style: TextStyle(
+                            fontSize: 15.0,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF38A169),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14.0),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4.0),
+                      child: LinearProgressIndicator(
+                        value: 1.0,
+                        minHeight: 6.0,
+                        backgroundColor: const Color(0xFFDCFCE7),
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF38A169)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10.0),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4.0),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 6.0,
-              backgroundColor: AppColors.dividerColor,
-              valueColor: AlwaysStoppedAnimation<Color>(iconColor),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
