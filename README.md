@@ -16,6 +16,13 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
+## Optional Khora AI server
+
+The app includes a built-in local Khora advisor. To enable live responses,
+copy `.env.example` to `.env` and set `EXPO_PUBLIC_KHORA_AI_ENDPOINT` to your
+own server endpoint. Store the Anthropic API key on that server, not in the
+Expo app.
+
 In the output, you'll find options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)

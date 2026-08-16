@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "927432952045",
+    "project_id": "likhoraai",
+    "storage_bucket": "likhoraai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:927432952045:android:99b45d02db9d63f44c24e4",
+        "android_client_info": {
+          "package_name": "com.company.likhoraai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "927432952045-mbsassv3ldpl5o208d8d0bbkcmi3gpjm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-wrlc8bR0dhUklZdoE8ALGr8cWl3-uIw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "927432952045-mbsassv3ldpl5o208d8d0bbkcmi3gpjm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
