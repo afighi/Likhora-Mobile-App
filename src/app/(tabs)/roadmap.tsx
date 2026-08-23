@@ -1327,7 +1327,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
   },
   removeStepLinkText: {
     fontSize: 13,
@@ -2006,7 +2005,12 @@ const styles = StyleSheet.create({
     fontFamily: LikhoraFont.fontFamily,
   },
   popupFooter: {
-    flexDirection: 'row',
+    // Stacks the "Mark Complete" button above the "Remove this step / Done"
+    // row. This used to be flexDirection: 'row' back when the footer only
+    // held two side-by-side buttons — now that it holds two stacked
+    // sections, 'row' squeezed them side-by-side instead, which is what
+    // caused the overlapping "Remove this step" / "Done" text.
+    flexDirection: 'column',
     gap: 10,
     paddingVertical: Spacing.three,
     borderTopWidth: 1,
