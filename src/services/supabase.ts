@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { auth as firebaseAuth } from './firebase';
 
 const SUPABASE_URL = 'https://cljzmisdceuxuzbwmnrz.supabase.co';
 
@@ -15,6 +16,33 @@ export const getSupabaseClient = (): SupabaseClient => {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,
+      },
+      // This app authenticates users through Firebase, not Supabase's own
+      // Auth. Supabase's "Third-Party Auth" support lets it verify a
+      // Firebase ID token directly (once Firebase is added as a trusted
+      // provider in the Supabase Dashboard) and populate auth.jwt()/RLS
+      // context from it — so every request here carries the current
+      // Firebase user's ID token, refreshed automatically by the Firebase
+      // SDK, letting RLS policies enforce real per-user data ownership
+      // instead of relying only on client-side query filters.
+      accessToken: async () => {
+        // Firebase restores a persisted login asynchronously (from
+        // IndexedDB/localStorage), so immediately after an app start or hot
+        // reload, `auth.currentUser` can briefly read as null even for an
+        // already-logged-in user — before Firebase has finished checking.
+        // Without this wait, a request that races that window goes out with
+        // no token, and under RLS that reads back as "no profile found,"
+        // which previously got misread elsewhere as "this is a new user"
+        // (see AuthContext.tsx) — resetting onboarding and briefly wiping
+        // profile data that was never actually missing.
+        await firebaseAuth.authStateReady();
+        const user = firebaseAuth.currentUser;
+        if (!user) return null;
+        try {
+          return await user.getIdToken();
+        } catch {
+          return null;
+        }
       },
     });
   }
@@ -37,6 +65,9 @@ export interface UserProfile {
   onboarding_step?: number;
   onboarding_draft?: string;
   created_at?: string;
+  avatar_color?: string;
+  push_notifications_enabled?: boolean;
+  email_notifications_enabled?: boolean;
 }
 
 export interface SubStep {
@@ -100,6 +131,7 @@ export interface SupplierItem {
   phone: string;
   lat?: number;
   lng?: number;
+  image_url?: string;
   created_at?: string;
 }
 
@@ -114,6 +146,18 @@ export const createRoadmapUuid = () => {
 };
 
 const isUuid = (value?: string) => Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+
+// In-memory cache & request deduplication map for user profile fetching
+const profileCache = new Map<string, { data: any; error: any; timestamp: number }>();
+const pendingProfileFetches = new Map<string, Promise<{ data: any; error: any }>>();
+
+export const clearProfileCache = (userId?: string) => {
+  if (userId) {
+    profileCache.delete(userId);
+  } else {
+    profileCache.clear();
+  }
+};
 
 // 1. Sync & Upsert User Profile
 export const syncUserProfile = async (profile: UserProfile) => {
@@ -134,12 +178,16 @@ export const syncUserProfile = async (profile: UserProfile) => {
 
     if (profile.onboarding_step !== undefined) payload.onboarding_step = profile.onboarding_step;
     if (profile.onboarding_draft !== undefined) payload.onboarding_draft = profile.onboarding_draft;
+    if (profile.avatar_color !== undefined) payload.avatar_color = profile.avatar_color;
+    if (profile.push_notifications_enabled !== undefined) payload.push_notifications_enabled = profile.push_notifications_enabled;
+    if (profile.email_notifications_enabled !== undefined) payload.email_notifications_enabled = profile.email_notifications_enabled;
 
     const { data, error } = await supabase
       .from('profiles')
       .upsert(payload, { onConflict: 'id' });
 
     if (error) console.warn('Supabase profile sync warning:', error);
+    clearProfileCache(profile.id);
     return { data, error };
   } catch (err) {
     console.warn('Supabase sync exception:', err);
@@ -147,18 +195,40 @@ export const syncUserProfile = async (profile: UserProfile) => {
   }
 };
 
-// 2. Fetch User Profile
+// 2. Fetch User Profile (Deduplicated with maybeSingle)
 export const fetchUserProfile = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    return { data, error };
-  } catch (err) {
-    return { data: null, error: err };
+  if (!userId) return { data: null, error: 'No user ID' };
+
+  // Check 3-second cache
+  const cached = profileCache.get(userId);
+  if (cached && Date.now() - cached.timestamp < 3000) {
+    return { data: cached.data, error: cached.error };
   }
+
+  // Deduplicate in-flight requests for the exact same userId
+  if (pendingProfileFetches.has(userId)) {
+    return pendingProfileFetches.get(userId)!;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      profileCache.set(userId, { data, error, timestamp: Date.now() });
+      return { data, error };
+    } catch (err) {
+      return { data: null, error: err };
+    } finally {
+      pendingProfileFetches.delete(userId);
+    }
+  })();
+
+  pendingProfileFetches.set(userId, fetchPromise);
+  return fetchPromise;
 };
 
 // 3. Save Onboarding Progress Step
@@ -372,6 +442,133 @@ export const getDefaultPhilippineRoadmapTasks = (userId: string, businessType?: 
   },
 ];
 
+// ----------------------------------------------------
+// Onboarding-driven Roadmap Tailoring
+// ----------------------------------------------------
+// The full onboarding wizard answers, as saved in `profiles.onboarding_draft`.
+export interface OnboardingAnswers {
+  selectedCategory?: string;
+  customCategory?: string;
+  businessNameInput?: string;
+  selectedStage?: string;
+  selectedRegion?: { name: string } | null;
+  selectedProvince?: { name: string } | null;
+  selectedCity?: { name: string } | null;
+  selectedBarangay?: { name: string } | null;
+  selectedCustomers?: string[];
+  differentiator?: string;
+  researchStage?: string;
+  startingBudget?: string;
+  fundingSources?: string[];
+  cashRunway?: string;
+  registrationType?: string;
+  obtainedPermits?: string[];
+  insuranceStatus?: string;
+  selectedRisks?: string[];
+}
+
+// Shared with the onboarding Step 7 "Risks & Backup Plan" screen so the
+// contingency copy shown there and the copy saved into the roadmap match.
+export const RISK_CONTINGENCIES: { [risk: string]: string } = {
+  'Slow sales': 'Launch a 3-day opening promotion and partner with neighboring stores for cross-referrals.',
+  'Strong competition': 'Highlight your specific business advantage and offer GCash cash-in convenience or bundle items.',
+  'Rising supply prices': 'Source ingredients directly from Divisoria or local wet market wholesalers and lock in bulk rates.',
+  Spoilage: 'Keep daily inventory lean during week 1 and establish a strict first-in, first-out stock system.',
+  'Running out of cash': 'Keep a portion of your starting budget untouched as emergency cash and review weekly expenses.',
+  'Typhoons or outages': 'Prepare solar/rechargeable lights and waterproof storage for raw inventory.',
+  'Permit problems': 'Complete your Barangay Micro-Business Permit first before applying for Mayor permit clearance.',
+  'Not having enough time': 'Set fixed 2-hour daily operational slots and delegate basic tasks to family or staff.',
+};
+
+// Permit answer labels (from onboarding Step 6) mapped to the matching
+// default roadmap task id, so a permit the user says they already have gets
+// marked Completed instead of asking them to redo it.
+const PERMIT_TASK_MAP: { [permitLabel: string]: string } = {
+  'Barangay clearance': '1',
+  DTI: '2',
+  "Mayor's / Business Permit": '3',
+  BIR: '4',
+};
+
+/**
+ * Turns the generic Philippine launch checklist into a plan tailored to this
+ * user's actual onboarding answers: skips permits they already hold, swaps
+ * the registration step for SEC when they're incorporating, and appends a
+ * risk-contingency task built from the specific risks they flagged.
+ */
+export const tailorRoadmapTasks = (
+  tasks: RoadmapTask[],
+  answers: OnboardingAnswers
+): RoadmapTask[] => {
+  let tailored = tasks.map((task) => {
+    if (!task.id) return task;
+
+    const matchedPermit = Object.entries(PERMIT_TASK_MAP).find(
+      ([label, taskId]) => taskId === task.id && answers.obtainedPermits?.includes(label)
+    );
+    if (matchedPermit) {
+      return {
+        ...task,
+        status: 'Completed' as const,
+        sub_steps: (task.sub_steps || []).map((s) => ({ ...s, completed: true })),
+      };
+    }
+
+    // Corporations register with the SEC instead of DTI's sole-proprietor flow.
+    if (task.id === '2' && answers.registrationType === 'corporation') {
+      return {
+        ...task,
+        title: 'SEC Corporate Registration',
+        desc: 'National legal registration for a corporation, replacing DTI sole-proprietor registration.',
+        agency: 'Securities and Exchange Commission (SEC)',
+        legal_basis: 'Revised Corporation Code of the Philippines (RA 11232)',
+        estimated_time: '3 - 10 Business Days',
+        estimated_cost: '₱2,000 - ₱10,000 (varies by capital)',
+        required_docs: ['Articles of Incorporation', 'By-Laws', "Treasurer's Affidavit", '2 Valid IDs of incorporators'],
+        sub_steps: [
+          { id: '2-1', title: 'Reserve company name via SEC Company Registration System (SEC CRS)', completed: false },
+          { id: '2-2', title: 'Prepare Articles of Incorporation & By-Laws', completed: false },
+          { id: '2-3', title: 'Submit documents and pay filing fees online via SEC CRS', completed: false },
+          { id: '2-4', title: 'Download Certificate of Incorporation upon approval', completed: false },
+        ],
+      };
+    }
+
+    return task;
+  });
+
+  if (answers.selectedRisks && answers.selectedRisks.length > 0) {
+    const riskLines = answers.selectedRisks
+      .map((risk) => `• ${risk}: ${RISK_CONTINGENCIES[risk] || 'Review this risk with Khora AI for a tailored plan.'}`)
+      .join('\n');
+
+    tailored = [
+      ...tailored,
+      {
+        user_id: tasks[0]?.user_id || '',
+        title: 'Risk Contingency & Backup Plan',
+        category: 'Planning',
+        status: 'Pending',
+        desc: `Based on the risks you flagged during onboarding, here is your starting contingency plan:\n${riskLines}`,
+        step_order: (tasks.length || 0) + 1,
+        agency: 'Self-managed',
+        legal_basis: 'Personal business continuity planning (not a government requirement)',
+        estimated_time: 'Ongoing',
+        estimated_cost: 'Varies',
+        required_docs: [],
+        sub_steps: answers.selectedRisks.map((risk, idx) => ({
+          id: `risk-${idx + 1}`,
+          title: `Prepare for: ${risk}`,
+          desc: RISK_CONTINGENCIES[risk],
+          completed: false,
+        })),
+      },
+    ];
+  }
+
+  return tailored;
+};
+
 export const fetchUserRoadmap = async (userId: string) => {
   try {
     const { data, error } = await supabase
@@ -458,6 +655,54 @@ export const replaceUserRoadmap = async (userId: string, tasks: RoadmapTask[]) =
   })));
 };
 
+// ----------------------------------------------------
+// User's Personal Template Library
+// ----------------------------------------------------
+// A user's saved templates, distinct from their single active roadmap
+// (public.roadmaps). Built via the template builder so a user can create
+// more than one and later choose which one to share to Community — sharing
+// no longer just publishes whatever the active roadmap happens to be.
+export interface UserTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  business_type: string;
+  summary: string;
+  image_url: string;
+  template_data: RoadmapTask[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const fetchUserTemplates = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('user_templates')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  return { data: data as UserTemplate[] | null, error };
+};
+
+export const createUserTemplate = async (
+  template: Omit<UserTemplate, 'id' | 'created_at' | 'updated_at'>
+) => {
+  const { data, error } = await supabase
+    .from('user_templates')
+    .insert({ ...template, updated_at: new Date().toISOString() })
+    .select()
+    .single();
+  return { data: data as UserTemplate | null, error };
+};
+
+export const deleteUserTemplate = async (templateId: string, userId: string) => {
+  const { error } = await supabase
+    .from('user_templates')
+    .delete()
+    .eq('id', templateId)
+    .eq('user_id', userId);
+  return { error };
+};
+
 export const fetchCommunityPosts = async () => {
   const { data, error } = await supabase
     .from('community_posts')
@@ -521,19 +766,30 @@ export const fetchSuppliersFromSupabase = async (category?: string, searchQuery?
   try {
     let query = supabase.from('suppliers').select('*');
 
-    if (locationFilter && locationFilter !== 'Philippines' && locationFilter !== 'your area') {
-      query = query.ilike('location', `%${locationFilter}%`);
-    }
-
-    if (category && category !== 'All') {
+    if (category && category !== 'All' && category !== 'Nearby') {
       query = query.eq('category', category);
     }
 
     if (searchQuery && searchQuery.trim()) {
-      query = query.ilike('name', `%${searchQuery.trim()}%`);
+      const q = searchQuery.trim();
+      query = query.or(`name.ilike.%${q}%,category.ilike.%${q}%,location.ilike.%${q}%`);
     }
 
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    // Fallback: If strict location/query produced no results, fetch all suppliers
+    if ((!data || data.length === 0) && locationFilter) {
+      let fallbackQuery = supabase.from('suppliers').select('*');
+      if (category && category !== 'All' && category !== 'Nearby') {
+        fallbackQuery = fallbackQuery.eq('category', category);
+      }
+      const res = await fallbackQuery;
+      if (res.data && res.data.length > 0) {
+        data = res.data;
+        error = null;
+      }
+    }
+
     return { data, error };
   } catch (err) {
     return { data: null, error: err };

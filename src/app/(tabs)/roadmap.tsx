@@ -1,24 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Modal,
-  TextInput
+  Modal
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { 
-  CheckCircle2, 
-  Circle, 
-  Sparkles, 
-  Store, 
-  Plus, 
-  Bell, 
-  Bookmark, 
+import {
+  CheckCircle2,
+  Sparkles,
+  Store,
+  Plus,
+  Bell,
+  Bookmark,
   ArrowRight,
   Clock,
   Coins,
@@ -29,15 +27,16 @@ import {
   Building2,
   Scale,
   ShieldCheck,
-  ChevronRight,
-  Trash2
+  Trash2,
+  Lock,
+  Check
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useNotification } from '@/context/NotificationContext';
-import { createRoadmapUuid, deleteRoadmapTask, fetchUserRoadmap, saveUserRoadmap, RoadmapTask, SubStep, getDefaultPhilippineRoadmapTasks } from '@/services/supabase';
+import { deleteRoadmapTask, fetchUserRoadmap, saveUserRoadmap, RoadmapTask, getDefaultPhilippineRoadmapTasks } from '@/services/supabase';
 import { askKhoraAI } from '@/services/claude';
 
 // Helper to guarantee authentic legal basis, agency, timeline, cost, required docs, and actionable sub-steps for any task
@@ -185,15 +184,10 @@ export default function RoadmapTab() {
   const [tasks, setTasks] = useState<RoadmapTask[]>([]);
   const [selectedTaskModal, setSelectedTaskModal] = useState<RoadmapTask | null>(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState<RoadmapTask | null>(null);
-  const [activeCategory, setActiveCategory] = useState<'All' | 'Permits' | 'Supplies' | 'Finance' | 'Launch'>('All');
   const [aiAdviceModal, setAiAdviceModal] = useState<{ title: string; advice: string } | null>(null);
   const [taskAiAdviceMap, setTaskAiAdviceMap] = useState<Record<string, string>>({});
   const [loadingAi, setLoadingAi] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [showCustomTaskModal, setShowCustomTaskModal] = useState(false);
-  const [customTaskTitle, setCustomTaskTitle] = useState('');
-  const [customTaskDescription, setCustomTaskDescription] = useState('');
-  const [customTaskCategory, setCustomTaskCategory] = useState('General');
 
   // Load User Roadmap from Supabase or generate default
   useEffect(() => {
@@ -340,36 +334,6 @@ export default function RoadmapTab() {
     Alert.alert('New Roadmap Started!', `Switched active launch plan to "${templateName}". Real Philippine legal steps are now loaded.`);
   };
 
-  const createCustomTask = async () => {
-    if (!user?.uid || !customTaskTitle.trim()) {
-      Alert.alert('Add a task title', 'Describe the business task you want to track.');
-      return;
-    }
-    const newTask: RoadmapTask = {
-      id: createRoadmapUuid(),
-      client_key: `custom-${Date.now()}`,
-      user_id: user.uid,
-      title: customTaskTitle.trim(),
-      desc: customTaskDescription.trim(),
-      category: customTaskCategory.trim() || 'General',
-      status: 'Pending',
-      step_order: tasks.length + 1,
-      sub_steps: [],
-    };
-    const updated = [...tasks, newTask];
-    setTasks(updated);
-    const { error } = await saveUserRoadmap(updated);
-    if (error) {
-      setTasks(tasks);
-      Alert.alert('Could not save task', 'Run the Week 4 database migration, then try again.');
-      return;
-    }
-    setCustomTaskTitle('');
-    setCustomTaskDescription('');
-    setCustomTaskCategory('General');
-    setShowCustomTaskModal(false);
-  };
-
   const removeTask = (task: RoadmapTask) => {
     if (!user?.uid || (!task.id && !task.client_key)) return;
     setTaskPendingDeletion(task);
@@ -393,11 +357,19 @@ export default function RoadmapTab() {
   const completedCount = tasks.filter((t) => t.status === 'Completed').length;
   const progressPercent = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
 
-  // Filter Tasks by Category
-  const filteredTasks = tasks.filter((t) => {
-    if (activeCategory === 'All') return true;
-    return t.category === activeCategory;
-  });
+  // Guided, sequential ordering: steps unlock one at a time. `activeStepIndex`
+  // is the first not-yet-completed step in order — the one the user should
+  // be working on right now. Anything before it is done; anything after it
+  // is locked until this one is completed.
+  const orderedTasks = [...tasks].sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0));
+  const activeStepIndex = orderedTasks.findIndex((t) => t.status !== 'Completed');
+  const currentStepTitle = activeStepIndex >= 0 ? orderedTasks[activeStepIndex].title : null;
+
+  const isTaskLocked = (task: RoadmapTask): boolean => {
+    if (task.status === 'Completed' || activeStepIndex === -1) return false;
+    const activeOrder = orderedTasks[activeStepIndex]?.step_order ?? 0;
+    return (task.step_order ?? 0) > activeOrder;
+  };
 
   // Template Library
   const STARTUP_TEMPLATES = [
@@ -637,9 +609,9 @@ export default function RoadmapTab() {
           <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
         </View>
 
-        <TouchableOpacity style={styles.customTaskButton} onPress={() => setShowCustomTaskModal(true)} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
           <Plus size={16} color="#FFFFFF" />
-          <Text style={styles.customTaskButtonText}>Add custom business task</Text>
+          <Text style={styles.customTaskButtonText}>Create your own template</Text>
         </TouchableOpacity>
 
         {/* 2. SEGMENTED CONTROL & CATEGORY FILTERS */}
@@ -664,35 +636,6 @@ export default function RoadmapTab() {
             </Text>
           </TouchableOpacity>
         </View>
-
-        {!showTemplates && (
-          <View style={styles.categoryFilterRow}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-              {(['All', 'Permits', 'Supplies', 'Finance', 'Launch'] as const).map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[
-                    styles.filterChip,
-                    activeCategory === cat && styles.filterChipActive,
-                  ]}
-                  onPress={() => {
-                    setActiveCategory(cat);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      activeCategory === cat && styles.filterChipTextActive,
-                    ]}
-                  >
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
 
         {/* 3. TEMPLATE EXPLORER OR TASK LIST */}
         {showTemplates ? (
@@ -755,129 +698,120 @@ export default function RoadmapTab() {
               </View>
             )}
 
-            {filteredTasks.map((rawTask, idx) => {
-              const task = ensureSubSteps(rawTask);
-              const taskIdKey = task.id || task.title || `task-${idx}`;
-              const isCompleted = task.status === 'Completed';
+            {/* Guided step-by-step journey: one focused step at a time.
+                Completed steps sit above, collapsed; upcoming steps stay
+                locked and collapsed below, so nothing overwhelming is on
+                screen at once. */}
+            <View style={styles.stepperContainer}>
+              {orderedTasks.map((rawTask, idx) => {
+                const task = ensureSubSteps(rawTask);
+                const taskIdKey = task.id || task.title || `task-${idx}`;
+                const isCompleted = task.status === 'Completed';
+                const isActive = idx === activeStepIndex;
+                const isLocked = isTaskLocked(task);
+                const isLast = idx === orderedTasks.length - 1;
 
-              const subSteps = task.sub_steps || [];
-              const completedSubSteps = subSteps.filter(s => s.completed).length;
-              const subPercent = subSteps.length > 0 ? Math.round((completedSubSteps / subSteps.length) * 100) : 0;
+                const subSteps = task.sub_steps || [];
+                const completedSubSteps = subSteps.filter(s => s.completed).length;
+                const subPercent = subSteps.length > 0 ? Math.round((completedSubSteps / subSteps.length) * 100) : 0;
 
-              return (
-                <View
-                  key={taskIdKey}
-                  style={[
-                    styles.taskCard,
-                    isCompleted && styles.taskCardCompleted,
-                  ]}
-                >
-                  {/* Task Header Row (Tap to open Pop-up Modal) */}
-                  <TouchableOpacity
-                    style={styles.taskTopRow}
-                    onPress={() => setSelectedTaskModal(task)}
-                    activeOpacity={0.8}
-                  >
-                    {/* Main Checkbox */}
-                    <TouchableOpacity
-                      style={styles.checkboxBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        toggleTaskStatus(task, idx);
-                      }}
-                      activeOpacity={0.7}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      {isCompleted ? (
-                        <CheckCircle2 size={24} color={LikhoraColors.successGreen} />
-                      ) : (
-                        <Circle size={24} color={LikhoraColors.textPlaceholder} />
-                      )}
-                    </TouchableOpacity>
-
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <View style={styles.tagRow}>
-                        <View style={[styles.categoryBadge, isCompleted ? styles.completedBadge : styles.inProgressBadge]}>
-                          <Text style={[styles.categoryBadgeText, isCompleted ? styles.completedBadgeText : styles.inProgressBadgeText]}>
-                            {isCompleted ? 'Completed' : 'In Progress'}
-                          </Text>
-                        </View>
-                        <Text style={styles.stepOrderText}>Step {task.step_order || idx + 1}</Text>
-                      </View>
-
-                      <Text
+                return (
+                  <View key={taskIdKey} style={styles.stepRow}>
+                    {/* Connector: dot + line down to the next step */}
+                    <View style={styles.stepConnectorCol}>
+                      <View
                         style={[
-                          styles.taskTitle,
-                          isCompleted && styles.taskTitleCompleted,
+                          styles.stepDot,
+                          isCompleted && styles.stepDotCompleted,
+                          isActive && styles.stepDotActive,
                         ]}
                       >
-                        {task.title}
-                      </Text>
-
-                      {task.desc ? (
-                        <Text style={styles.taskDesc} numberOfLines={2}>
-                          {task.desc}
-                        </Text>
-                      ) : null}
-
-                      {/* Mini Metadata Pills */}
-                      <View style={styles.cardMetaPillRow}>
-                        {task.agency && (
-                          <View style={styles.cardAgencyPill}>
-                            <Building2 size={10} color={LikhoraColors.primary} style={{ marginRight: 3 }} />
-                            <Text style={styles.cardAgencyPillText} numberOfLines={1}>{task.agency}</Text>
-                          </View>
-                        )}
-                        {task.estimated_time && (
-                          <View style={styles.cardTimePill}>
-                            <Clock size={10} color={LikhoraColors.textSecondary} style={{ marginRight: 3 }} />
-                            <Text style={styles.cardTimePillText}>{task.estimated_time}</Text>
-                          </View>
+                        {isCompleted ? (
+                          <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                        ) : isLocked ? (
+                          <Lock size={12} color={LikhoraColors.textPlaceholder} />
+                        ) : (
+                          <Text style={styles.stepDotNumber}>{task.step_order || idx + 1}</Text>
                         )}
                       </View>
-
-                      {/* Sub-step indicator bar */}
-                      <View style={styles.subStepIndicatorRow}>
-                        <Text style={styles.subStepIndicatorText}>
-                          {completedSubSteps}/{subSteps.length} Steps Done
-                        </Text>
-                        <View style={styles.miniProgressTrack}>
-                          <View style={[styles.miniProgressFill, { width: `${subPercent}%` }]} />
-                        </View>
-                      </View>
+                      {!isLast && (
+                        <View style={[styles.stepConnectorLine, isCompleted && styles.stepConnectorLineDone]} />
+                      )}
                     </View>
 
-                    {/* View Details Arrow Trigger */}
-                    <View style={styles.viewDetailBtn}>
-                      <ChevronRight size={18} color={LikhoraColors.primary} />
-                    </View>
-                  </TouchableOpacity>
+                    {/* Content */}
+                    <View style={{ flex: 1, paddingBottom: isLast ? 0 : Spacing.three }}>
+                      {isActive ? (
+                        <TouchableOpacity
+                          style={styles.activeStepCard}
+                          onPress={() => setSelectedTaskModal(task)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.activeStepEyebrow}>YOUR CURRENT STEP</Text>
+                          <Text style={styles.activeStepTitle}>{task.title}</Text>
+                          {task.desc ? (
+                            <Text style={styles.activeStepDesc} numberOfLines={2}>{task.desc}</Text>
+                          ) : null}
 
-                  {/* Card Action Trigger Bar */}
-                  <View style={styles.cardFooterBar}>
-                    <TouchableOpacity
-                      style={styles.openPopupBtn}
-                      onPress={() => setSelectedTaskModal(task)}
-                      activeOpacity={0.8}
-                    >
-                      <FileText size={13} color={LikhoraColors.primary} style={{ marginRight: 5 }} />
-                      <Text style={styles.openPopupBtnText}>View Detailed Legal Guide & Steps</Text>
-                      <ArrowRight size={13} color={LikhoraColors.primary} style={{ marginLeft: 4 }} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.deleteTaskBtn}
-                      onPress={() => removeTask(task)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${task.title}`}
-                      accessibilityHint="Removes this task from your roadmap"
-                      hitSlop={6}
-                    >
-                      <Trash2 size={18} color={LikhoraColors.errorRed} />
-                    </TouchableOpacity>
+                          <View style={styles.cardMetaPillRow}>
+                            {task.agency && (
+                              <View style={styles.cardAgencyPill}>
+                                <Building2 size={10} color={LikhoraColors.primary} style={{ marginRight: 3 }} />
+                                <Text style={styles.cardAgencyPillText} numberOfLines={1}>{task.agency}</Text>
+                              </View>
+                            )}
+                            {task.estimated_time && (
+                              <View style={styles.cardTimePill}>
+                                <Clock size={10} color={LikhoraColors.textSecondary} style={{ marginRight: 3 }} />
+                                <Text style={styles.cardTimePillText}>{task.estimated_time}</Text>
+                              </View>
+                            )}
+                          </View>
+
+                          {subSteps.length > 0 && (
+                            <View style={styles.subStepIndicatorRow}>
+                              <Text style={styles.subStepIndicatorText}>
+                                {completedSubSteps}/{subSteps.length} steps done
+                              </Text>
+                              <View style={styles.miniProgressTrack}>
+                                <View style={[styles.miniProgressFill, { width: `${subPercent}%` }]} />
+                              </View>
+                            </View>
+                          )}
+
+                          <View style={styles.continueStepBtn}>
+                            <Text style={styles.continueStepBtnText}>Continue this step</Text>
+                            <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                          </View>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={[styles.compactStepRow, isLocked && styles.compactStepRowLocked]}
+                          onPress={() => setSelectedTaskModal(task)}
+                          activeOpacity={0.75}
+                        >
+                          <Text
+                            style={[
+                              styles.compactStepTitle,
+                              isCompleted && styles.compactStepTitleCompleted,
+                              isLocked && styles.compactStepTitleLocked,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {task.title}
+                          </Text>
+                          {isCompleted ? (
+                            <Text style={styles.compactStepTagDone}>Done</Text>
+                          ) : isLocked ? (
+                            <Text style={styles.compactStepTagLocked}>Locked</Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
-                </View>
-              );
-            })}
+                );
+              })}
+            </View>
           </ScrollView>
         )}
 
@@ -906,26 +840,12 @@ export default function RoadmapTab() {
           </View>
         </Modal>
 
-        <Modal visible={showCustomTaskModal} transparent animationType="slide" onRequestClose={() => setShowCustomTaskModal(false)}>
-          <View style={styles.popupOverlay}>
-            <View style={styles.customTaskModal}>
-              <Text style={styles.customTaskModalTitle}>New custom business task</Text>
-              <Text style={styles.customTaskModalSub}>Add a task for any business idea—even one without an existing template.</Text>
-              <TextInput style={styles.customTaskInput} value={customTaskTitle} onChangeText={setCustomTaskTitle} placeholder="Task title" placeholderTextColor={LikhoraColors.textPlaceholder} />
-              <TextInput style={styles.customTaskInput} value={customTaskCategory} onChangeText={setCustomTaskCategory} placeholder="Category (e.g. Marketing)" placeholderTextColor={LikhoraColors.textPlaceholder} />
-              <TextInput style={[styles.customTaskInput, styles.customTaskDescription]} value={customTaskDescription} onChangeText={setCustomTaskDescription} multiline placeholder="Notes or details (optional)" placeholderTextColor={LikhoraColors.textPlaceholder} />
-              <View style={styles.customTaskActions}>
-                <TouchableOpacity style={styles.customTaskCancel} onPress={() => setShowCustomTaskModal(false)}><Text style={styles.customTaskCancelText}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.customTaskSave} onPress={createCustomTask}><Text style={styles.customTaskSaveText}>Save task</Text></TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
         {/* ------------------------------------------------------------------ */}
         {/* REAL LEGAL PROCESS POP-UP MODAL WINDOW                             */}
         {/* ------------------------------------------------------------------ */}
-        {selectedTaskModal && (
+        {selectedTaskModal && (() => {
+          const isModalTaskLocked = isTaskLocked(selectedTaskModal);
+          return (
           <Modal
             visible={Boolean(selectedTaskModal)}
             animationType="slide"
@@ -934,7 +854,7 @@ export default function RoadmapTab() {
           >
             <View style={styles.popupOverlay}>
               <View style={styles.popupContainer}>
-                
+
                 {/* Popup Header */}
                 <View style={styles.popupHeader}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
@@ -958,7 +878,17 @@ export default function RoadmapTab() {
                 </View>
 
                 <ScrollView contentContainerStyle={styles.popupScrollBody} showsVerticalScrollIndicator={false}>
-                  
+
+                  {/* Locked-step preview notice */}
+                  {isModalTaskLocked && (
+                    <View style={styles.lockedBanner}>
+                      <Lock size={16} color={LikhoraColors.textSecondary} style={{ marginRight: 8 }} />
+                      <Text style={styles.lockedBannerText}>
+                        This is a preview. Finish “{currentStepTitle}” first to unlock and complete this step.
+                      </Text>
+                    </View>
+                  )}
+
                   {/* Official Legal Basis Card */}
                   {selectedTaskModal.legal_basis && (
                     <View style={styles.legalBasisBanner}>
@@ -1028,9 +958,11 @@ export default function RoadmapTab() {
                         style={[
                           styles.popupSubStepRow,
                           sub.completed && styles.popupSubStepRowCompleted,
+                          isModalTaskLocked && styles.popupSubStepRowLocked,
                         ]}
-                        onPress={() => toggleSubStep(selectedTaskModal, sub.id)}
-                        activeOpacity={0.7}
+                        onPress={() => !isModalTaskLocked && toggleSubStep(selectedTaskModal, sub.id)}
+                        activeOpacity={isModalTaskLocked ? 1 : 0.7}
+                        disabled={isModalTaskLocked}
                       >
                         <View style={styles.popupCheckIcon}>
                           {sub.completed ? (
@@ -1044,6 +976,7 @@ export default function RoadmapTab() {
                           style={[
                             styles.popupSubStepText,
                             sub.completed && styles.popupSubStepTextCompleted,
+                            isModalTaskLocked && styles.popupSubStepTextLocked,
                           ]}
                         >
                           {sub.title}
@@ -1079,33 +1012,55 @@ export default function RoadmapTab() {
 
                 {/* Popup Footer Buttons */}
                 <View style={styles.popupFooter}>
-                  <TouchableOpacity
-                    style={[
-                      styles.toggleCompleteBtn,
-                      selectedTaskModal.status === 'Completed' && styles.toggleCompleteBtnActive
-                    ]}
-                    onPress={() => toggleTaskStatus(selectedTaskModal)}
-                    activeOpacity={0.85}
-                  >
-                    <CheckCircle2 size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={styles.toggleCompleteBtnText}>
-                      {selectedTaskModal.status === 'Completed' ? 'Step Completed ✓' : 'Mark Entire Step Complete'}
-                    </Text>
-                  </TouchableOpacity>
+                  {isModalTaskLocked ? (
+                    <View style={styles.lockedFooterHint}>
+                      <Lock size={14} color={LikhoraColors.textSecondary} style={{ marginRight: 6 }} />
+                      <Text style={styles.lockedFooterHintText}>Complete the current step to unlock this one</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.toggleCompleteBtn,
+                        selectedTaskModal.status === 'Completed' && styles.toggleCompleteBtnActive
+                      ]}
+                      onPress={() => toggleTaskStatus(selectedTaskModal)}
+                      activeOpacity={0.85}
+                    >
+                      <CheckCircle2 size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.toggleCompleteBtnText}>
+                        {selectedTaskModal.status === 'Completed' ? 'Step Completed ✓' : 'Mark Entire Step Complete'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
-                  <TouchableOpacity
-                    style={styles.closeDoneBtn}
-                    onPress={() => setSelectedTaskModal(null)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.closeDoneBtnText}>Done</Text>
-                  </TouchableOpacity>
+                  <View style={styles.popupFooterBottomRow}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const task = selectedTaskModal;
+                        setSelectedTaskModal(null);
+                        removeTask(task);
+                      }}
+                      activeOpacity={0.7}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.removeStepLinkText}>Remove this step</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.closeDoneBtn}
+                      onPress={() => setSelectedTaskModal(null)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.closeDoneBtnText}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
               </View>
             </View>
           </Modal>
-        )}
+          );
+        })()}
 
       </View>
     </SafeAreaView>
@@ -1182,21 +1137,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     fontFamily: LikhoraFont.fontFamily,
   },
-  customTaskInput: {
-    borderWidth: 1,
-    borderColor: LikhoraColors.border,
-    borderRadius: Radius.medium,
-    paddingHorizontal: 12,
-    height: 46,
-    marginBottom: 10,
-    color: LikhoraColors.textPrimary,
-    fontFamily: LikhoraFont.fontFamily,
-  },
-  customTaskDescription: {
-    height: 88,
-    paddingTop: 12,
-    textAlignVertical: 'top',
-  },
   customTaskActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -1205,8 +1145,196 @@ const styles = StyleSheet.create({
   },
   customTaskCancel: { padding: 12 },
   customTaskCancelText: { color: LikhoraColors.primary, fontWeight: '800', fontFamily: LikhoraFont.fontFamily },
-  customTaskSave: { backgroundColor: LikhoraColors.primary, paddingHorizontal: 16, paddingVertical: 12, borderRadius: Radius.pill },
-  customTaskSaveText: { color: '#FFFFFF', fontWeight: '800', fontFamily: LikhoraFont.fontFamily },
+
+  // -----------------------------------------------------------------------
+  // Guided sequential stepper (My Journey view)
+  // -----------------------------------------------------------------------
+  stepperContainer: {
+    marginTop: Spacing.two,
+  },
+  stepRow: {
+    flexDirection: 'row',
+  },
+  stepConnectorCol: {
+    width: 32,
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  stepDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: LikhoraColors.inputBackground,
+    borderWidth: 1.5,
+    borderColor: LikhoraColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotCompleted: {
+    backgroundColor: LikhoraColors.successGreen,
+    borderColor: LikhoraColors.successGreen,
+  },
+  stepDotActive: {
+    backgroundColor: LikhoraColors.primary,
+    borderColor: LikhoraColors.primary,
+  },
+  stepDotNumber: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  stepConnectorLine: {
+    flex: 1,
+    width: 2,
+    minHeight: 20,
+    backgroundColor: LikhoraColors.border,
+    marginTop: 4,
+  },
+  stepConnectorLineDone: {
+    backgroundColor: LikhoraColors.successGreen,
+  },
+  // Compact row — used for completed and locked steps, kept deliberately
+  // plain (one line) so the screen isn't crowded with detail all at once.
+  compactStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radius.large,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+    paddingHorizontal: Spacing.three,
+    height: 48,
+  },
+  compactStepRowLocked: {
+    backgroundColor: LikhoraColors.inputBackground,
+    borderColor: 'transparent',
+  },
+  compactStepTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  compactStepTitleCompleted: {
+    color: LikhoraColors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
+  compactStepTitleLocked: {
+    color: LikhoraColors.textPlaceholder,
+  },
+  compactStepTagDone: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: LikhoraColors.successGreen,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  compactStepTagLocked: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: LikhoraColors.textPlaceholder,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  // The one fully-expanded card — always the step the user should be
+  // working on right now.
+  activeStepCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radius.xlarge,
+    padding: Spacing.four,
+    borderWidth: 2,
+    borderColor: LikhoraColors.primary,
+    shadowColor: LikhoraColors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  activeStepEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  activeStepTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  activeStepDesc: {
+    fontSize: 13,
+    color: LikhoraColors.textSecondary,
+    marginTop: 4,
+    lineHeight: 18,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  continueStepBtn: {
+    marginTop: 16,
+    height: 44,
+    borderRadius: Radius.pill,
+    backgroundColor: LikhoraColors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continueStepBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  // Locked-step preview banner (inside the detail modal)
+  lockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: LikhoraColors.inputBackground,
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  lockedBannerText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  popupSubStepRowLocked: {
+    opacity: 0.55,
+  },
+  popupSubStepTextLocked: {
+    color: LikhoraColors.textPlaceholder,
+  },
+  lockedFooterHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    backgroundColor: LikhoraColors.inputBackground,
+    borderRadius: Radius.pill,
+  },
+  lockedFooterHintText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  popupFooterBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  removeStepLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: LikhoraColors.errorRed,
+    fontFamily: LikhoraFont.fontFamily,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: LikhoraColors.backgroundScreen,

@@ -33,7 +33,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { syncUserProfile, saveUserRoadmap, saveOnboardingStepProgress, getDefaultPhilippineRoadmapTasks, RoadmapTask } from '@/services/supabase';
+import {
+  syncUserProfile,
+  saveUserRoadmap,
+  saveOnboardingStepProgress,
+  getDefaultPhilippineRoadmapTasks,
+  tailorRoadmapTasks,
+  RISK_CONTINGENCIES,
+  RoadmapTask,
+  OnboardingAnswers,
+} from '@/services/supabase';
 import { 
   PHILIPPINE_REGIONS, 
   getProvincesByRegionAsync, 
@@ -273,18 +282,6 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Risk Contingencies Database
-  const RISK_CONTINGENCIES: { [risk: string]: string } = {
-    'Slow sales': 'Launch a 3-day opening promotion and partner with neighboring stores for cross-referrals.',
-    'Strong competition': 'Highlight your specific business advantage and offer GCash cash-in convenience or bundle items.',
-    'Rising supply prices': 'Source ingredients directly from Divisoria or local wet market wholesalers and lock in bulk rates.',
-    'Spoilage': 'Keep daily inventory lean during week 1 and establish a strict first-in, first-out stock system.',
-    'Running out of cash': 'Keep a portion of your starting budget untouched as emergency cash and review weekly expenses.',
-    'Typhoons or outages': 'Prepare solar/rechargeable lights and waterproof storage for raw inventory.',
-    'Permit problems': 'Complete your Barangay Micro-Business Permit first before applying for Mayor permit clearance.',
-    'Not having enough time': 'Set fixed 2-hour daily operational slots and delegate basic tasks to family or staff.',
-  };
-
   // Helper Multi-select Toggle
   const toggleArrayItem = (arr: string[], item: string) => {
     if (arr.includes(item)) return arr.filter((i) => i !== item);
@@ -319,7 +316,31 @@ export default function OnboardingScreen() {
       const finalCategory = selectedCategory === 'other' ? customCategory.trim() : selectedCategory;
       const locationString = selectedCity ? `${selectedCity.name}, ${selectedProvince?.name || 'Philippines'}` : 'Philippines';
 
-      // 1. Sync User Profile in Supabase
+      // The complete set of answers from every step, used both as the
+      // persisted record of this user's onboarding and to tailor their
+      // generated roadmap below.
+      const finalAnswers: OnboardingAnswers = {
+        selectedCategory,
+        customCategory,
+        businessNameInput,
+        selectedStage,
+        selectedRegion,
+        selectedProvince,
+        selectedCity,
+        selectedBarangay,
+        selectedCustomers,
+        differentiator,
+        researchStage,
+        startingBudget,
+        fundingSources,
+        cashRunway,
+        registrationType,
+        obtainedPermits,
+        insuranceStatus,
+        selectedRisks,
+      };
+
+      // 1. Sync User Profile in Supabase, including the finalized answers
       if (user) {
         await syncUserProfile({
           id: user.uid,
@@ -331,10 +352,14 @@ export default function OnboardingScreen() {
           location: locationString,
           onboarded: true,
           onboarding_step: 8,
+          onboarding_draft: JSON.stringify(finalAnswers),
         });
 
-        // 2. Save User Roadmap Tasks in Supabase
-        const roadmapTasks: RoadmapTask[] = getDefaultPhilippineRoadmapTasks(user.uid, finalCategory, locationString);
+        // 2. Generate the default checklist, then tailor it to this user's
+        //    actual answers (skip permits already obtained, swap DTI for SEC
+        //    when incorporating, append a risk-contingency task), and save it.
+        const defaultTasks: RoadmapTask[] = getDefaultPhilippineRoadmapTasks(user.uid, finalCategory, locationString);
+        const roadmapTasks: RoadmapTask[] = tailorRoadmapTasks(defaultTasks, finalAnswers);
         await saveUserRoadmap(roadmapTasks);
       }
 
@@ -450,7 +475,8 @@ export default function OnboardingScreen() {
             style={styles.navBackBtn}
             onPress={() => {
               if (step > 1) animateToStep(step - 1);
-              else router.back();
+              else if (router.canGoBack()) router.back();
+              else router.replace('/login');
             }}
             activeOpacity={0.7}
           >

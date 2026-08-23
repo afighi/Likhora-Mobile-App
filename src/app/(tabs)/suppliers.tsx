@@ -1,34 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity, 
-  TextInput, 
-  ActivityIndicator, 
-  Alert, 
-  Modal, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Modal,
   Platform,
   Linking
 } from 'react-native';
+import { Image } from 'expo-image';
+import { WebView } from 'react-native-webview';
 import { useRouter } from 'expo-router';
-import { 
-  Bell, 
-  Search, 
-  MapPin, 
-  Navigation, 
-  Sparkles, 
-  Phone, 
-  Star, 
-  Plus, 
-  Check, 
-  X, 
+import {
+  Bell,
+  Search,
+  MapPin,
+  Navigation,
+  Sparkles,
+  Phone,
+  Star,
+  Plus,
+  Check,
+  X,
   Store,
+  ImageOff,
   LocateFixed,
   RefreshCw,
-  Map as MapIcon,
-  ShoppingBag
+  ShoppingBag,
+  SlidersHorizontal,
+  ImageIcon
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -37,6 +41,30 @@ import { useAuth } from '@/context/AuthContext';
 import { useNotification } from '@/context/NotificationContext';
 import { fetchSuppliersFromSupabase, SupplierItem } from '@/services/supabase';
 import { AppLogo } from '@/components/ui/AppLogo';
+import { getCurrentDeviceCoords, geocodePhilippineLocation } from '@/services/location';
+import {
+  isGooglePlacesConfigured,
+  searchNearbyPlaces,
+  searchTextPlaces,
+  CATEGORY_SEARCH_MAP,
+  GooglePlaceResult,
+  isSupplierRelevant,
+  getSupplierProfileForBusiness,
+} from '@/services/places';
+
+// Google Places (New) priceLevel enum -> a compact ₱ symbol for the UI.
+const GOOGLE_PRICE_LEVEL_MAP: Record<string, string> = {
+  PRICE_LEVEL_FREE: 'Free',
+  PRICE_LEVEL_INEXPENSIVE: '₱',
+  PRICE_LEVEL_MODERATE: '₱₱',
+  PRICE_LEVEL_EXPENSIVE: '₱₱₱',
+  PRICE_LEVEL_VERY_EXPENSIVE: '₱₱₱₱',
+};
+
+// Broad Metro Manila center — used only as a last-resort map center when
+// GPS is denied AND the user's saved location can't be geocoded, so the
+// list is never silently pinned to the wrong specific city.
+const PHILIPPINES_FALLBACK_COORDS = { lat: 14.5995, lng: 120.9842 };
 
 // Calculate Haversine distance in km
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -88,9 +116,45 @@ export default function SuppliersTab() {
   const [selectedMapPin, setSelectedMapPin] = useState<SupplierItem | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierItem | null>(null);
 
-  // Coordinates are only used after the device actually provides them.
+  // Client-side refinement filters, applied on top of whatever the active
+  // category/search already fetched — these don't trigger a re-fetch.
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [maxDistanceKm, setMaxDistanceKm] = useState<number | null>(null); // null = any distance
+  const [minRating, setMinRating] = useState<number | null>(null); // null = any rating
+  const [priceLevels, setPriceLevels] = useState<string[]>([]); // empty = any price
+  const [photoOnly, setPhotoOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<'distance' | 'rating' | 'name'>('distance');
+
+  const activeFilterCount =
+    (maxDistanceKm !== null ? 1 : 0) +
+    (minRating !== null ? 1 : 0) +
+    (priceLevels.length > 0 ? 1 : 0) +
+    (photoOnly ? 1 : 0) +
+    (sortBy !== 'distance' ? 1 : 0);
+
+  const resetFilters = () => {
+    setMaxDistanceKm(null);
+    setMinRating(null);
+    setPriceLevels([]);
+    setPhotoOnly(false);
+    setSortBy('distance');
+  };
+
+  const togglePriceLevel = (level: string) => {
+    setPriceLevels((prev) => (prev.includes(level) ? prev.filter((p) => p !== level) : [...prev, level]));
+  };
+
+  // Coordinates are only used after we've actually resolved a real location
+  // for this user — device GPS first, then their saved onboarding location
+  // geocoded to real coordinates, never a hardcoded guess.
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [locationSource, setLocationSource] = useState<'device' | 'profile'>('profile');
+  const [locationSource, setLocationSource] = useState<'device' | 'profile' | 'approximate'>('profile');
+  const [resolvingLocation, setResolvingLocation] = useState(true);
+  // 'auto' = try device GPS first, fall back to saved profile location
+  // (the original default behavior). Explicitly picking 'device' or
+  // 'profile' pins to that source so a live GPS reading can't silently
+  // override a location you deliberately want to browse suppliers near.
+  const [locationMode, setLocationMode] = useState<'auto' | 'device' | 'profile'>('auto');
 
   // Dynamically parse user's location from onboarding answers saved in Supabase profile
   const getUserLocationDisplay = (): { displayLocation: string; queryCity: string; province: string } => {
@@ -137,8 +201,13 @@ export default function SuppliersTab() {
     };
   };
 
-  const { displayLocation, queryCity } = getUserLocationDisplay();
+  const { displayLocation, queryCity, province } = getUserLocationDisplay();
   const businessType = userProfile?.business_type?.toLowerCase() || '';
+  // Tailors which supplier categories the "All"/"Nearby" browse view leads
+  // with, based on the user's actual onboarding business type (e.g. a
+  // Carinderia leads with rice/meat/ingredient suppliers, not generic
+  // wholesale that could include anything from feed stores to hardware).
+  const supplierProfile = getSupplierProfileForBusiness(userProfile?.business_type);
   const supplierRecommendation = businessType.includes('food') || businessType.includes('carinderia')
     ? 'For your food business, start with marketplaces, groceries, and wholesale suppliers. Compare fresh ingredient prices before committing.'
     : businessType.includes('retail') || businessType.includes('sari')
@@ -146,27 +215,76 @@ export default function SuppliersTab() {
       : 'Start with the closest verified marketplace or wholesale listing, then compare their current price range before choosing.';
   const supplierCategories = ['All', 'Rice & Grains', 'Meat', 'Packaging', 'Nearby', 'Malls & Supermarkets', 'Ingredients', 'Equipment'];
 
-  // Detect Device GPS Location
+  // Resolve the user's coordinates according to locationMode:
+  // - 'auto' (default): device GPS first, falling back to their saved
+  //   onboarding location geocoded to real lat/lng, then a broad fallback.
+  // - 'device' / 'profile': the user explicitly picked one via the toggle
+  //   below, so that source is used on its own — a live GPS reading can no
+  //   longer silently override a location they deliberately chose to browse.
   useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserCoords({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-          setLocationSource('device');
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 6000 }
-      );
-    }
-  }, []);
+    let cancelled = false;
+
+    const resolveViaDevice = async (): Promise<boolean> => {
+      const deviceCoords = await getCurrentDeviceCoords();
+      if (cancelled) return false;
+      if (deviceCoords) {
+        setUserCoords(deviceCoords);
+        setLocationSource('device');
+        return true;
+      }
+      return false;
+    };
+
+    const resolveViaProfile = async () => {
+      const geocoded = await geocodePhilippineLocation(`${queryCity}, ${province}`);
+      if (cancelled) return;
+      if (geocoded) {
+        setUserCoords(geocoded);
+        setLocationSource('profile');
+      } else {
+        setUserCoords(PHILIPPINES_FALLBACK_COORDS);
+        setLocationSource('approximate');
+      }
+    };
+
+    const resolveLocation = async () => {
+      setResolvingLocation(true);
+
+      if (locationMode === 'profile') {
+        await resolveViaProfile();
+      } else if (locationMode === 'device') {
+        const gotDevice = await resolveViaDevice();
+        if (!gotDevice && !cancelled) {
+          // They explicitly asked for device location but it's unavailable
+          // (denied permission, no GPS, etc.) — fall back so the screen
+          // still works, but be upfront that it's not what was asked for.
+          Alert.alert(
+            'Location access unavailable',
+            'Could not get your current device location. Showing your saved business location instead.'
+          );
+          await resolveViaProfile();
+        }
+      } else {
+        // auto
+        const gotDevice = await resolveViaDevice();
+        if (!gotDevice && !cancelled) {
+          await resolveViaProfile();
+        }
+      }
+
+      if (!cancelled) setResolvingLocation(false);
+    };
+
+    resolveLocation();
+    return () => {
+      cancelled = true;
+    };
+  }, [queryCity, province, locationMode]);
 
   // Fetch REAL Verified Commercial Businesses, Malls, Supermarkets & Wholesalers via OpenStreetMap Overpass API
   const fetchRealOverpassSuppliers = async (lat: number, lng: number, cityName: string): Promise<SupplierItem[]> => {
     const overpassQuery = `
-      [out:json][timeout:5];
+      [out:json][timeout:10];
       (
         nwr["shop"="supermarket"](around:15000,${lat},${lng});
         nwr["shop"="mall"](around:15000,${lat},${lng});
@@ -178,13 +296,13 @@ export default function SuppliersTab() {
     `;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     try {
       const res = await fetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: overpassQuery,
+        body: 'data=' + encodeURIComponent(overpassQuery),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -198,7 +316,11 @@ export default function SuppliersTab() {
             const supplierLat = el.lat ?? el.center?.lat;
             const supplierLng = el.lon ?? el.center?.lon;
             
-            let category = 'Rice & Grains';
+            // Default to 'Nearby' (not a specific category) for anything
+            // that doesn't clearly match — OSM's generic `shop=wholesale`
+            // tag covers everything from rice traders to hardware, so
+            // guessing a specific category for it would mislabel results.
+            let category = 'Nearby';
             if (shopType.includes('mall') || shopType.includes('supermarket') || shopType.includes('grocery') || shopType.includes('department_store')) {
               category = 'Malls & Supermarkets';
             } else if (shopType.includes('butcher') || shopType.includes('meat')) {
@@ -220,9 +342,9 @@ export default function SuppliersTab() {
               distance: `${distKm.toFixed(1)} km`,
               location: detailedAddress,
               tags: [
-                shopType.includes('mall') || shopType.includes('supermarket') 
-                  ? 'Shopping Mall & Supermarket' 
-                  : 'Wholesale Market', 
+                shopType.includes('mall') || shopType.includes('supermarket')
+                  ? 'Shopping Mall & Supermarket'
+                  : 'Wholesale Market',
                 'OpenStreetMap location'
               ],
               price_level: '',
@@ -234,97 +356,212 @@ export default function SuppliersTab() {
           });
 
           // SORT STRICTLY BY NEAREST DISTANCE ASCENDING
-          items.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+          items.sort((a: SupplierItem, b: SupplierItem) => parseFloat(a.distance) - parseFloat(b.distance));
           return items;
         }
       }
     } catch (e) {
-      // Graceful timeout/network fallback to local database
       clearTimeout(timeoutId);
     }
     return [];
   };
 
+  // Helper function to filter items by category & search query
+  const filterSuppliers = (items: SupplierItem[], cat: string, query: string): SupplierItem[] => {
+    const q = query.trim().toLowerCase();
+    return items.filter((item) => {
+      // Never show listings that don't fit any of Likhora's supported MSME
+      // business types (feed stores, veterinary suppliers, hardware, etc.),
+      // regardless of which source found them or which category is active.
+      if (!isSupplierRelevant(item.name)) return false;
+
+      const matchCat = cat === 'All' || cat === 'Nearby' || item.category === cat;
+      if (!matchCat) return false;
+      if (!q) return true;
+      const nameMatch = item.name?.toLowerCase().includes(q);
+      const locMatch = item.location?.toLowerCase().includes(q);
+      const catMatch = item.category?.toLowerCase().includes(q);
+      const tagMatch = item.tags?.some(t => t.toLowerCase().includes(q));
+      const priceMatch = item.price_range?.toLowerCase().includes(q);
+      return nameMatch || locMatch || catMatch || tagMatch || priceMatch;
+    });
+  };
+
+  // Map a Google Places (New) result to this app's SupplierItem shape.
+  const mapGooglePlaceToSupplier = (
+    place: GooglePlaceResult,
+    category: string,
+    fromLat: number,
+    fromLng: number
+  ): SupplierItem => ({
+    id: `gp-${place.id}`,
+    name: place.name,
+    category,
+    rating: place.rating ?? '',
+    distance: `${getDistanceFromLatLonInKm(fromLat, fromLng, place.lat, place.lng).toFixed(1)} km`,
+    location: place.address || `${displayLocation}, Philippines`,
+    tags: [
+      category,
+      place.userRatingCount ? `${place.userRatingCount} Google reviews` : 'Google Places listing',
+    ],
+    price_level: place.priceLevel ? GOOGLE_PRICE_LEVEL_MAP[place.priceLevel] || '' : '',
+    price_range: place.priceLevel ? GOOGLE_PRICE_LEVEL_MAP[place.priceLevel] : 'Not published by this listing',
+    phone: place.phone || '',
+    lat: place.lat,
+    lng: place.lng,
+    image_url: place.photoUrl || undefined,
+  });
+
+  // Categorize a free-text Google Places search result (used when the user
+  // is actively searching rather than browsing a specific category chip).
+  const categorizeByGoogleTypes = (types: string[]): string => {
+    if (types.some((t) => ['shopping_mall', 'department_store', 'supermarket', 'grocery_store', 'convenience_store'].includes(t))) {
+      return 'Malls & Supermarkets';
+    }
+    return 'Nearby';
+  };
+
+  // Fetch REAL, photo-rich nearby suppliers via Google Places API (New).
+  // This is the most accurate source we have, so it's tried first whenever
+  // an API key is configured; every other source below stays as a free
+  // fallback for when it isn't.
+  const fetchGooglePlacesSuppliers = async (
+    lat: number,
+    lng: number,
+    category: string,
+    query: string
+  ): Promise<SupplierItem[]> => {
+    if (!isGooglePlacesConfigured()) return [];
+
+    let results: SupplierItem[] = [];
+
+    if (query.trim()) {
+      const places = await searchTextPlaces(`${query.trim()} supplier`, lat, lng);
+      results = places.map((p) => mapGooglePlaceToSupplier(p, categorizeByGoogleTypes(p.types), lat, lng));
+    } else {
+      const targets = category !== 'All' && category !== 'Nearby'
+        ? [category]
+        : supplierProfile.categories;
+
+      const grouped = await Promise.all(
+        targets.map(async (cat) => {
+          const config = CATEGORY_SEARCH_MAP[cat];
+          if (!config) return [] as SupplierItem[];
+          const places = config.types
+            ? await searchNearbyPlaces(lat, lng, config.types)
+            : config.textQuery
+              ? await searchTextPlaces(config.textQuery, lat, lng)
+              : [];
+          return places.map((p) => mapGooglePlaceToSupplier(p, cat, lat, lng));
+        })
+      );
+      results = grouped.flat();
+    }
+
+    // De-duplicate (the same place can surface from more than one category
+    // search) and sort nearest-first.
+    const seenIds = new Set<string>();
+    const deduped = results.filter((s) => {
+      if (seenIds.has(s.id)) return false;
+      seenIds.add(s.id);
+      return true;
+    });
+    deduped.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+    return deduped;
+  };
+
   // Main Live API Fetcher
   const loadSuppliersLive = async () => {
+    if (!userCoords) return;
     setLoading(true);
-    
-    // 1. Query Supabase Database First
-    const { data } = await fetchSuppliersFromSupabase(activeCategory, searchQuery, queryCity);
-    if (data && data.length > 0) {
-      const sortedDb = data.map((supplier) => userCoords && supplier.lat && supplier.lng ? {
-        ...supplier,
-        distance: `${getDistanceFromLatLonInKm(userCoords.lat, userCoords.lng, Number(supplier.lat), Number(supplier.lng)).toFixed(1)} km`,
-      } : supplier).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
-      setSuppliersList(sortedDb);
-      setLoading(false);
-      return;
-    }
+    const activeCoords = userCoords;
 
-    // 2. Query Live OpenStreetMap Overpass API around User's GPS Location (Malls, Supermarkets, Groceries, Markets)
-    const overpassResults = userCoords ? await fetchRealOverpassSuppliers(userCoords.lat, userCoords.lng, queryCity) : [];
-    if (overpassResults.length > 0) {
-      const filtered = overpassResults.filter(s => activeCategory === 'All' || s.category === activeCategory);
-      const sorted = (filtered.length > 0 ? filtered : overpassResults).sort(
-        (a, b) => parseFloat(a.distance) - parseFloat(b.distance)
-      );
-      setSuppliersList(sorted);
-      setLoading(false);
-      return;
-    }
-
-    // 3. Fallback Query OpenStreetMap Nominatim Places API for Malls, Supermarkets & Wholesalers
     try {
-      const keyword = searchQuery.trim() 
+      // 1. Google Places API (New) — real, accurate, photo-rich listings.
+      const googleResults = await fetchGooglePlacesSuppliers(activeCoords.lat, activeCoords.lng, activeCategory, searchQuery);
+      if (googleResults.length > 0) {
+        const filteredGoogle = filterSuppliers(googleResults, activeCategory, searchQuery);
+        if (filteredGoogle.length > 0) {
+          setSuppliersList(filteredGoogle);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 2. Query Supabase Database
+      const { data } = await fetchSuppliersFromSupabase(activeCategory, searchQuery, queryCity);
+      if (data && data.length > 0) {
+        const mappedDb = data.map((supplier) => ({
+          ...supplier,
+          distance: supplier.lat && supplier.lng
+            ? `${getDistanceFromLatLonInKm(activeCoords.lat, activeCoords.lng, Number(supplier.lat), Number(supplier.lng)).toFixed(1)} km`
+            : supplier.distance || '1.0 km',
+        })).sort((a: SupplierItem, b: SupplierItem) => parseFloat(a.distance) - parseFloat(b.distance));
+
+        const filteredDb = filterSuppliers(mappedDb, activeCategory, searchQuery);
+        if (filteredDb.length > 0) {
+          setSuppliersList(filteredDb);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 3. Query Live OpenStreetMap Overpass API around GPS / Fallback Coordinates
+      const overpassResults = await fetchRealOverpassSuppliers(activeCoords.lat, activeCoords.lng, queryCity);
+      if (overpassResults.length > 0) {
+        const filteredOverpass = filterSuppliers(overpassResults, activeCategory, searchQuery);
+        if (filteredOverpass.length > 0) {
+          setSuppliersList(filteredOverpass);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 4. Fallback Query OpenStreetMap Nominatim Places API
+      const keyword = searchQuery.trim()
         ? searchQuery.trim() 
-        : 'supermarket mall grocery wholesale market supplier';
+        : `${activeCategory !== 'All' ? activeCategory : 'supermarket mall grocery wholesale market'}`;
+
       const apiRes = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword)}+in+${encodeURIComponent(queryCity)}&limit=25`,
         { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
       );
+
       if (apiRes.ok) {
         const apiData = await apiRes.json();
         if (apiData && apiData.length > 0) {
           const mappedFromApi: SupplierItem[] = apiData.map((item: any, idx: number) => {
             const itemLat = parseFloat(item.lat);
             const itemLng = parseFloat(item.lon);
-            const distKm = userCoords ? getDistanceFromLatLonInKm(userCoords.lat, userCoords.lng, itemLat, itemLng) : null;
+            const distKm = getDistanceFromLatLonInKm(activeCoords.lat, activeCoords.lng, itemLat, itemLng);
             const isMallOrGrocery = item.display_name.toLowerCase().includes('mall') || 
                                     item.display_name.toLowerCase().includes('supermarket') ||
-                                    item.display_name.toLowerCase().includes('grocery') ||
-                                    item.display_name.toLowerCase().includes('puregold') ||
-                                    item.display_name.toLowerCase().includes('savemore') ||
-                                    item.display_name.toLowerCase().includes('robinsons');
-
-            const detailedLoc = formatDetailedAddress(null, queryCity, item.display_name);
+                                    item.display_name.toLowerCase().includes('grocery');
 
             return {
               id: item.place_id ? String(item.place_id) : String(idx + 1),
               name: item.display_name.split(',')[0] || `Supplier near ${queryCity}`,
               category: isMallOrGrocery ? 'Malls & Supermarkets' : 'Nearby',
               rating: '',
-              distance: distKm === null ? 'Distance unavailable' : `${distKm.toFixed(1)} km`,
-              location: detailedLoc,
-              tags: [isMallOrGrocery ? 'Shopping Mall & Supermarket' : 'Mapped place', 'OpenStreetMap search result'],
+              distance: `${distKm.toFixed(1)} km`,
+              location: formatDetailedAddress(null, queryCity, item.display_name),
+              tags: [isMallOrGrocery ? 'Shopping Mall & Supermarket' : 'Mapped place', 'OpenStreetMap result'],
               price_level: '',
               price_range: 'Not published by this listing',
               phone: '',
               lat: itemLat,
               lng: itemLng,
             };
-          });
+          }).sort((a: SupplierItem, b: SupplierItem) => parseFloat(a.distance) - parseFloat(b.distance));
 
-          // SORT STRICTLY BY NEAREST DISTANCE FIRST
-          mappedFromApi.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
-
-          const filtered = mappedFromApi.filter(s => activeCategory === 'All' || s.category === activeCategory);
-          setSuppliersList(filtered.length > 0 ? filtered : mappedFromApi);
+          const filteredApi = filterSuppliers(mappedFromApi, activeCategory, searchQuery);
+          setSuppliersList(filteredApi);
           setLoading(false);
           return;
         }
       }
     } catch (e) {
-      console.warn('Nominatim API notice:', e);
+      console.warn('Supplier API fetch notice:', e);
     }
 
     setSuppliersList([]);
@@ -332,8 +569,39 @@ export default function SuppliersTab() {
   };
 
   useEffect(() => {
-    loadSuppliersLive();
+    if (userCoords) loadSuppliersLive();
   }, [activeCategory, searchQuery, queryCity, displayLocation, userCoords]);
+
+  // Refinement filters applied on top of the already-fetched results — no
+  // re-fetch needed, so these feel instant.
+  const filteredSuppliersList = useMemo(() => {
+    let list = suppliersList.filter((item) => {
+      if (maxDistanceKm !== null) {
+        const km = parseFloat(item.distance);
+        if (Number.isNaN(km) || km > maxDistanceKm) return false;
+      }
+      if (minRating !== null) {
+        const rating = typeof item.rating === 'number' ? item.rating : parseFloat(String(item.rating));
+        if (Number.isNaN(rating) || rating < minRating) return false;
+      }
+      if (priceLevels.length > 0 && !priceLevels.includes(item.price_level)) return false;
+      if (photoOnly && !item.image_url) return false;
+      return true;
+    });
+
+    if (sortBy === 'rating') {
+      list = [...list].sort((a, b) => {
+        const ra = typeof a.rating === 'number' ? a.rating : parseFloat(String(a.rating)) || 0;
+        const rb = typeof b.rating === 'number' ? b.rating : parseFloat(String(b.rating)) || 0;
+        return rb - ra;
+      });
+    } else if (sortBy === 'name') {
+      list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    // 'distance' is already the fetch pipeline's default sort order.
+
+    return list;
+  }, [suppliersList, maxDistanceKm, minRating, priceLevels, photoOnly, sortBy]);
 
   const toggleAddToPlan = (id: string, name: string) => {
     if (addedPlans.includes(id)) {
@@ -345,45 +613,84 @@ export default function SuppliersTab() {
   };
 
   // Generate HTML for Interactive Leaflet Map with Real Supplier Markers
-  const generateLeafletMapHtml = () => {
-    const mapCenter = userCoords || suppliersList.find((supplier) => supplier.lat && supplier.lng);
-    if (!mapCenter) return '';
-    const markersScript = suppliersList
+  // Renders the actual Leaflet map (real OpenStreetMap tiles + real supplier
+  // pins). `interactive: false` produces a static, un-pannable/un-zoomable
+  // snapshot for the small hero preview card — same real map, just frozen so
+  // it doesn't fight the screen's vertical scroll or the popup doesn't
+  // auto-open in a cramped space.
+  const generateLeafletMapHtml = (interactive: boolean) => {
+    // What the user is asking to look at takes priority: a specific
+    // supplier they tapped "View on map" for, THEN their own location, THEN
+    // just any supplier with coordinates as a last resort. Previously this
+    // always centered on the user's own location and ignored which pin was
+    // selected entirely.
+    const hasSelectedPin = Boolean(interactive && selectedMapPin?.lat && selectedMapPin?.lng);
+    const viewCenter = hasSelectedPin
+      ? selectedMapPin!
+      : userCoords || filteredSuppliersList.find((supplier) => supplier.lat && supplier.lng);
+    if (!viewCenter) return '';
+
+    const markersScript = filteredSuppliersList
       .filter(s => s.lat && s.lng)
-      .map(s => `
-        L.marker([${s.lat}, ${s.lng}])
-         .addTo(map)
-         .bindPopup('<b>${s.name.replace(/'/g, "\\'")}</b><br>${s.category} • ${s.distance}<br><small>${s.location.replace(/'/g, "\\'")}</small>');
-      `)
+      .map((s, idx) => {
+        const isSelected = hasSelectedPin && s.id === selectedMapPin!.id;
+        const pinColor = isSelected ? '#7C3AED' : '#0EA5E9';
+        const pinSize = isSelected ? 26 : 20;
+        return `
+        var pinIcon${idx} = L.divIcon({
+          className: 'custom-pin-container',
+          html: '<div style="background:${pinColor}; border:${isSelected ? 3 : 2}px solid #FFFFFF; border-radius:50%; width:${pinSize}px; height:${pinSize}px; box-shadow:0 2px 6px rgba(0,0,0,0.35);"></div>',
+          iconSize: [${pinSize}, ${pinSize}],
+          iconAnchor: [${pinSize / 2}, ${pinSize / 2}]
+        });
+        var marker${idx} = L.marker([${s.lat}, ${s.lng}], { icon: pinIcon${idx} })
+         .addTo(map)${interactive ? `
+         .bindPopup('<b>${s.name.replace(/'/g, "\\'")}</b><br>${s.category} • ${s.distance}<br><small>${s.location.replace(/'/g, "\\'")}</small>')` : ''};
+        ${isSelected ? `marker${idx}.openPopup();` : ''}
+      `;
+      })
       .join('\n');
+
+    const interactionOptions = interactive
+      ? '{ zoomControl: true }'
+      : '{ zoomControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false, attributionControl: false }';
 
     return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
         <style>
-          html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; }
-          .user-marker { background: #0EA5E9; border: 3px solid #fff; border-radius: 50%; width: 16px; height: 16px; box-shadow: 0 0 10px rgba(14,165,233,0.8); }
+          html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #E5E7EB; }
+          .user-marker { background: #7C3AED; border: 3px solid #FFFFFF; border-radius: 50%; width: 18px; height: 18px; box-shadow: 0 0 10px rgba(124, 58, 237, 0.8); }
+          .leaflet-control-container { ${interactive ? '' : 'display: none;'} }
         </style>
       </head>
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map', { zoomControl: true }).setView([${mapCenter.lat}, ${mapCenter.lng}], 13);
+          // Override Leaflet default icon image lookup to avoid 3rd-party PNG storage tracking blocks
+          if (window.L && L.Icon && L.Icon.Default) {
+            delete L.Icon.Default.prototype._getIconUrl;
+            L.Icon.Default.mergeOptions({
+              iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBFQTVFOSI+PHBhdGggZD0iTTEyIDJDMzguMTMgMiA0IDYuMTMgNCAxMWMwIDUuMjUgOCAxMyA4IDEzczgtNy43NSA4LTEzYzAtNC44Ny00LjEzLTktOS05em0wIDExYy0xLjY2IDAtMy0xLjM0LTMtM3MxLjM0LTMgMy0zIDMgMS4zNCAzIDMgMS4zNCAzLTMgM3oiLz48L3N2Zz4=',
+              shadowUrl: ''
+            });
+          }
+
+          var map = L.map('map', ${interactionOptions}).setView([${viewCenter.lat}, ${viewCenter.lng}], ${hasSelectedPin ? 17 : (interactive ? 13 : 14)});
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap contributors'
           }).addTo(map);
 
-          // This marker is only a user marker when device coordinates are available.
-          var userIcon = L.divIcon({ className: 'user-marker' });
-          L.marker([${mapCenter.lat}, ${mapCenter.lng}], { icon: userIcon })
-           .addTo(map)
-           .bindPopup('<b>${locationSource === 'device' ? 'Your location' : 'Map center'}</b><br>${displayLocation}')
-           .openPopup();
+          ${(userCoords && !hasSelectedPin) ? `
+          var userIcon = L.divIcon({ className: 'user-marker', iconSize: [18, 18], iconAnchor: [9, 9] });
+          var userMarker = L.marker([${userCoords.lat}, ${userCoords.lng}], { icon: userIcon }).addTo(map);
+          ${interactive ? `userMarker.bindPopup('<b>${locationSource === 'device' ? 'Your location' : 'Map center'}</b><br>${displayLocation}');` : ''}
+          ` : ''}
 
           ${markersScript}
         </script>
@@ -395,7 +702,7 @@ export default function SuppliersTab() {
   const openOpenStreetMap = async () => {
     const mapCenter = selectedMapPin?.lat && selectedMapPin?.lng
       ? selectedMapPin
-      : userCoords || suppliersList.find((supplier) => supplier.lat && supplier.lng);
+      : userCoords || filteredSuppliersList.find((supplier) => supplier.lat && supplier.lng);
     if (!mapCenter?.lat || !mapCenter?.lng) {
       Alert.alert('Map unavailable', 'Allow location access or load supplier results before opening the map.');
       return;
@@ -448,11 +755,42 @@ export default function SuppliersTab() {
             <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
               <MapPin size={16} color={LikhoraColors.aiBlue} style={{ marginRight: 6 }} />
                 <Text style={styles.locationText} numberOfLines={1}>
-                {locationSource === 'device' ? 'Showing near your device' : 'Showing near your saved location'}: <Text style={{ fontWeight: '800', color: LikhoraColors.textPrimary }}>{displayLocation}</Text>
+                {locationSource === 'device'
+                  ? 'Showing near your device'
+                  : locationSource === 'profile'
+                    ? 'Showing near your saved location'
+                    : 'Approximate — could not detect your exact location'}: <Text style={{ fontWeight: '800', color: LikhoraColors.textPrimary }}>{displayLocation}</Text>
               </Text>
             </View>
             <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/profile')}>
-              <Text style={styles.changeLocText}>Change</Text>
+              <Text style={styles.changeLocText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Explicit source picker — GPS is tried automatically by default,
+              but this lets you pin to one source so a live GPS reading can't
+              silently override a location you deliberately want to browse. */}
+          <View style={styles.locationModeRow}>
+            <TouchableOpacity
+              style={[styles.locationModeChip, locationSource === 'device' && styles.locationModeChipActive]}
+              onPress={() => setLocationMode('device')}
+              activeOpacity={0.8}
+            >
+              <LocateFixed size={12} color={locationSource === 'device' ? '#FFFFFF' : LikhoraColors.textSecondary} style={{ marginRight: 4 }} />
+              <Text style={[styles.locationModeChipText, locationSource === 'device' && styles.locationModeChipTextActive]}>
+                Current Location
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.locationModeChip, locationSource !== 'device' && styles.locationModeChipActive]}
+              onPress={() => setLocationMode('profile')}
+              activeOpacity={0.8}
+            >
+              <Store size={12} color={locationSource !== 'device' ? '#FFFFFF' : LikhoraColors.textSecondary} style={{ marginRight: 4 }} />
+              <Text style={[styles.locationModeChipText, locationSource !== 'device' && styles.locationModeChipTextActive]}>
+                My Business Location
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -485,21 +823,44 @@ export default function SuppliersTab() {
             ))}
           </ScrollView>
 
-          {/* 5. VISUAL MAP HERO BANNER */}
-          <TouchableOpacity 
-            style={styles.mapHeroBanner} 
-            onPress={() => setShowMapModal(true)}
+          {/* 5. VISUAL MAP HERO BANNER — a real, live map preview centered on
+              the user, not a decorative placeholder. Frozen (no pan/zoom) so
+              it doesn't fight the screen's scroll; tapping it opens the full
+              interactive map. */}
+          <TouchableOpacity
+            style={styles.mapHeroBanner}
+            onPress={() => {
+              // Opened generically (not for a specific supplier) — clear any
+              // previously selected pin so the map doesn't wrongly re-center
+              // on a stale selection from an earlier "View on map" tap.
+              setSelectedMapPin(null);
+              setShowMapModal(true);
+            }}
             activeOpacity={0.9}
           >
-            <View style={styles.mapVisualOverlay}>
-              <View style={[styles.mapVisualDot, { top: '30%', left: '25%' }]} />
-              <View style={[styles.mapVisualDot, { top: '55%', left: '60%' }]} />
-              <View style={[styles.mapVisualDot, { top: '40%', left: '75%' }]} />
-            </View>
+            {userCoords ? (
+              Platform.OS === 'web' ? (
+                <iframe
+                  srcDoc={generateLeafletMapHtml(false)}
+                  style={{ width: '100%', height: '100%', border: 0, pointerEvents: 'none' }}
+                  title="Supplier map preview"
+                />
+              ) : (
+                <WebView
+                  source={{ html: generateLeafletMapHtml(false) }}
+                  style={styles.mapPreviewFill}
+                  pointerEvents="none"
+                  scrollEnabled={false}
+                  originWhitelist={['*']}
+                />
+              )
+            ) : (
+              <View style={styles.mapPreviewLoading}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              </View>
+            )}
 
-            <View style={styles.mapPinGraphic}>
-              <MapIcon size={24} color="#FFFFFF" />
-            </View>
+            <View style={styles.mapPreviewShade} pointerEvents="none" />
 
             <View style={styles.openMapBtn}>
               <Navigation size={14} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
@@ -517,20 +878,35 @@ export default function SuppliersTab() {
               <Text style={styles.contextBodyText}>
                 {suppliersList.length > 0
                   ? `These ${suppliersList.length} suppliers & shopping malls cover the items your active plan needs — closest to ${displayLocation} first.`
-                  : `Connecting to live OpenStreetMap Overpass API for suppliers near ${displayLocation}...`}
+                  : `Searching live suppliers near ${displayLocation}...`}
               </Text>
             </View>
           </View>
 
-          {/* 7. SUPPLIERS LIST HEADER */}
-          <View style={{ marginBottom: Spacing.three }}>
+          {/* 7. SUPPLIERS LIST HEADER + FILTER BUTTON */}
+          <View style={styles.listHeaderRow}>
             <Text style={styles.sectionHeaderTitle}>
-              {suppliersList.length} suppliers nearby
+              {filteredSuppliersList.length} suppliers nearby
             </Text>
+            <TouchableOpacity
+              style={[styles.filterBtn, activeFilterCount > 0 && styles.filterBtnActive]}
+              onPress={() => setShowFilterModal(true)}
+              activeOpacity={0.8}
+            >
+              <SlidersHorizontal size={15} color={activeFilterCount > 0 ? '#FFFFFF' : LikhoraColors.primary} style={{ marginRight: 6 }} />
+              <Text style={[styles.filterBtnText, activeFilterCount > 0 && styles.filterBtnTextActive]}>
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* 8. REAL SUPPLIER CARDS WITH DETAILED STREET ADDRESS */}
-          {loading ? (
+          {resolvingLocation ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size="large" color={LikhoraColors.primary} />
+              <Text style={{ marginTop: 10, color: LikhoraColors.textSecondary, fontSize: 13 }}>Getting your location...</Text>
+            </View>
+          ) : loading ? (
             <View style={{ paddingVertical: 40, alignItems: 'center' }}>
               <ActivityIndicator size="large" color={LikhoraColors.primary} />
               <Text style={{ marginTop: 10, color: LikhoraColors.textSecondary, fontSize: 13 }}>Fetching suppliers, malls & groceries near {displayLocation}...</Text>
@@ -540,7 +916,7 @@ export default function SuppliersTab() {
               <Store size={32} color={LikhoraColors.textPlaceholder} style={{ marginBottom: 8 }} />
               <Text style={styles.emptyStateTitle}>No suppliers found near {displayLocation}</Text>
               <Text style={styles.emptyStateSub}>
-                Tap below to re-query the live OpenStreetMap Places API.
+                Tap below to search again.
               </Text>
               <TouchableOpacity
                 style={styles.retryApiBtn}
@@ -551,17 +927,47 @@ export default function SuppliersTab() {
                 <Text style={styles.retryApiBtnText}>Retry Live API Search</Text>
               </TouchableOpacity>
             </View>
+          ) : filteredSuppliersList.length === 0 ? (
+            <View style={styles.emptyStateBox}>
+              <SlidersHorizontal size={32} color={LikhoraColors.textPlaceholder} style={{ marginBottom: 8 }} />
+              <Text style={styles.emptyStateTitle}>No suppliers match your filters</Text>
+              <Text style={styles.emptyStateSub}>
+                {suppliersList.length} suppliers were found near {displayLocation}, but none match your current filters.
+              </Text>
+              <TouchableOpacity
+                style={styles.retryApiBtn}
+                onPress={resetFilters}
+                activeOpacity={0.8}
+              >
+                <SlidersHorizontal size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.retryApiBtnText}>Reset Filters</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
-            suppliersList.map((item) => {
+            filteredSuppliersList.map((item) => {
               const isAdded = addedPlans.includes(item.id);
               const isMall = item.category === 'Malls & Supermarkets' || item.tags.some(t => t.toLowerCase().includes('mall') || t.toLowerCase().includes('supermarket'));
 
               return (
                 <View key={item.id} style={styles.supplierCard}>
-                  
+
+                  {/* Store Photo (real photo when available, e.g. via Google Places) */}
+                  {item.image_url ? (
+                    <Image
+                      source={{ uri: item.image_url }}
+                      style={styles.supplierPhoto}
+                      contentFit="cover"
+                      transition={150}
+                    />
+                  ) : (
+                    <View style={[styles.supplierPhoto, styles.supplierPhotoPlaceholder]}>
+                      <ImageOff size={22} color={LikhoraColors.textPlaceholder} />
+                    </View>
+                  )}
+
                   {/* Top Info */}
                   <TouchableOpacity style={styles.supplierTopRow} onPress={() => setSelectedSupplier(item)} activeOpacity={0.8}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[styles.supplierIconCircle, isMall && { backgroundColor: '#E0F2FE' }]}
                       onPress={() => {
                         setShowMapModal(true);
@@ -667,7 +1073,7 @@ export default function SuppliersTab() {
             <View style={styles.mapFrameContainer}>
               {Platform.OS === 'web' ? (
                 <iframe
-                  srcDoc={generateLeafletMapHtml()}
+                  srcDoc={generateLeafletMapHtml(true)}
                   style={{ width: '100%', height: '100%', border: 0 }}
                   title="Interactive Supplier Map"
                 />
@@ -717,6 +1123,14 @@ export default function SuppliersTab() {
         <Modal visible={Boolean(selectedSupplier)} transparent animationType="slide" onRequestClose={() => setSelectedSupplier(null)}>
           <View style={styles.supplierDetailOverlay}>
             <View style={styles.supplierDetailSheet}>
+              {selectedSupplier?.image_url && (
+                <Image
+                  source={{ uri: selectedSupplier.image_url }}
+                  style={styles.detailPhoto}
+                  contentFit="cover"
+                  transition={150}
+                />
+              )}
               <View style={styles.detailHeader}><View style={{ flex: 1 }}><Text style={styles.detailTitle}>{selectedSupplier?.name}</Text><Text style={styles.detailCategory}>{selectedSupplier?.category}</Text></View><TouchableOpacity onPress={() => setSelectedSupplier(null)}><X size={20} color={LikhoraColors.textSecondary} /></TouchableOpacity></View>
               <Text style={styles.detailLabel}>Location</Text><Text style={styles.detailValue}>{selectedSupplier?.location || 'Location unavailable'}</Text>
               <Text style={styles.detailLabel}>Distance</Text><Text style={styles.detailValue}>{selectedSupplier?.distance || 'Distance unavailable'}</Text>
@@ -724,6 +1138,108 @@ export default function SuppliersTab() {
               <Text style={styles.detailLabel}>Contact</Text><Text style={styles.detailValue}>{selectedSupplier?.phone || 'No public phone number in this listing'}</Text>
               <Text style={styles.detailLabel}>Listing details</Text><View style={styles.detailTags}>{selectedSupplier?.tags?.map((tag) => <View key={tag} style={styles.detailTag}><Text style={styles.detailTagText}>{tag}</Text></View>)}</View>
               <TouchableOpacity style={styles.detailMapButton} onPress={() => { setSelectedMapPin(selectedSupplier); setSelectedSupplier(null); setShowMapModal(true); }}><MapPin size={16} color="#FFFFFF" /><Text style={styles.detailMapText}>View on map</Text></TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 10. FILTER MODAL — refine what's already loaded, no re-fetch */}
+        <Modal visible={showFilterModal} transparent animationType="slide" onRequestClose={() => setShowFilterModal(false)}>
+          <View style={styles.supplierDetailOverlay}>
+            <View style={styles.filterSheet}>
+              <View style={styles.filterSheetHandle} />
+
+              <View style={styles.detailHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailTitle}>Filter suppliers</Text>
+                  <Text style={styles.filterSheetSub}>Refine the {suppliersList.length} suppliers already found near {displayLocation}.</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+                  <X size={20} color={LikhoraColors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+                {/* Distance */}
+                <Text style={styles.filterGroupLabel}>Distance</Text>
+                <View style={styles.filterOptionRow}>
+                  {[{ label: 'Any', value: null }, { label: '1 km', value: 1 }, { label: '3 km', value: 3 }, { label: '5 km', value: 5 }, { label: '10 km', value: 10 }].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.label}
+                      style={[styles.filterOptionChip, maxDistanceKm === opt.value && styles.filterOptionChipActive]}
+                      onPress={() => setMaxDistanceKm(opt.value)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.filterOptionChipText, maxDistanceKm === opt.value && styles.filterOptionChipTextActive]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Rating */}
+                <Text style={styles.filterGroupLabel}>Minimum rating</Text>
+                <View style={styles.filterOptionRow}>
+                  {[{ label: 'Any', value: null }, { label: '3.5+', value: 3.5 }, { label: '4.0+', value: 4 }, { label: '4.5+', value: 4.5 }].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.label}
+                      style={[styles.filterOptionChip, minRating === opt.value && styles.filterOptionChipActive]}
+                      onPress={() => setMinRating(opt.value)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.filterOptionChipText, minRating === opt.value && styles.filterOptionChipTextActive]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.filterHintText}>Only applies to listings with a published rating (mainly Google Places results) — unrated listings are hidden while a minimum is set.</Text>
+
+                {/* Price level */}
+                <Text style={styles.filterGroupLabel}>Price level</Text>
+                <View style={styles.filterOptionRow}>
+                  {['₱', '₱₱', '₱₱₱', '₱₱₱₱'].map((level) => (
+                    <TouchableOpacity
+                      key={level}
+                      style={[styles.filterOptionChip, priceLevels.includes(level) && styles.filterOptionChipActive]}
+                      onPress={() => togglePriceLevel(level)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.filterOptionChipText, priceLevels.includes(level) && styles.filterOptionChipTextActive]}>{level}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Sort by */}
+                <Text style={styles.filterGroupLabel}>Sort by</Text>
+                <View style={styles.filterOptionRow}>
+                  {[{ label: 'Nearest', value: 'distance' as const }, { label: 'Highest rated', value: 'rating' as const }, { label: 'Name (A–Z)', value: 'name' as const }].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.value}
+                      style={[styles.filterOptionChip, sortBy === opt.value && styles.filterOptionChipActive]}
+                      onPress={() => setSortBy(opt.value)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.filterOptionChipText, sortBy === opt.value && styles.filterOptionChipTextActive]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Has photo toggle */}
+                <TouchableOpacity style={styles.filterToggleRow} onPress={() => setPhotoOnly(!photoOnly)} activeOpacity={0.8}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <ImageIcon size={16} color={LikhoraColors.textSecondary} style={{ marginRight: 8 }} />
+                    <Text style={styles.filterToggleLabel}>Only show suppliers with a photo</Text>
+                  </View>
+                  <View style={[styles.checkbox, photoOnly && styles.checkboxSelected]}>
+                    {photoOnly && <Check size={12} color="#FFFFFF" strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
+              </ScrollView>
+
+              <View style={styles.filterActionsRow}>
+                <TouchableOpacity style={styles.filterResetBtn} onPress={resetFilters} activeOpacity={0.8}>
+                  <Text style={styles.filterResetBtnText}>Reset</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.filterApplyBtn} onPress={() => setShowFilterModal(false)} activeOpacity={0.85}>
+                  <Text style={styles.filterApplyBtnText}>Show {filteredSuppliersList.length} results</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -824,6 +1340,34 @@ const styles = StyleSheet.create({
     color: LikhoraColors.aiBlue,
     fontFamily: LikhoraFont.fontFamily,
   },
+  locationModeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+  },
+  locationModeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: Radius.pill,
+    backgroundColor: LikhoraColors.inputBackground,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+  },
+  locationModeChipActive: {
+    backgroundColor: LikhoraColors.aiBlue,
+    borderColor: LikhoraColors.aiBlue,
+  },
+  locationModeChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  locationModeChipTextActive: {
+    color: '#FFFFFF',
+  },
   filterScroll: {
     gap: 8,
     marginBottom: Spacing.four,
@@ -859,34 +1403,26 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.four,
     overflow: 'hidden',
   },
-  mapVisualOverlay: {
+  mapPreviewFill: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
+  },
+  mapPreviewLoading: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Subtle bottom shade so the "Open interactive map" pill stays legible
+  // over whatever map tile colors happen to be underneath it.
+  mapPreviewShade: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(14, 165, 233, 0.4)',
-  },
-  mapVisualDot: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  mapPinGraphic: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: LikhoraColors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
+    height: 56,
+    backgroundColor: 'rgba(0, 0, 0, 0.18)',
   },
   openMapBtn: {
     position: 'absolute',
@@ -948,6 +1484,32 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textPrimary,
     fontFamily: LikhoraFont.fontFamily,
   },
+  listHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.three,
+  },
+  filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LikhoraColors.secondaryLavender,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: Radius.pill,
+  },
+  filterBtnActive: {
+    backgroundColor: LikhoraColors.primary,
+  },
+  filterBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterBtnTextActive: {
+    color: '#FFFFFF',
+  },
   emptyStateBox: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -994,6 +1556,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
     borderWidth: 1,
     borderColor: LikhoraColors.border,
+  },
+  supplierPhoto: {
+    width: '100%',
+    height: 140,
+    borderRadius: Radius.large,
+    marginBottom: 12,
+    backgroundColor: LikhoraColors.inputBackground,
+  },
+  supplierPhotoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   supplierTopRow: {
     flexDirection: 'row',
@@ -1229,6 +1802,7 @@ const styles = StyleSheet.create({
   },
   supplierDetailOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
   supplierDetailSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: Radius.xlarge, borderTopRightRadius: Radius.xlarge, padding: Spacing.four, paddingBottom: Spacing.five },
+  detailPhoto: { width: '100%', height: 160, borderRadius: Radius.large, marginBottom: 14, backgroundColor: LikhoraColors.inputBackground },
   detailHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
   detailTitle: { fontSize: 21, fontWeight: '800', color: LikhoraColors.textPrimary, fontFamily: LikhoraFont.fontFamily },
   detailCategory: { marginTop: 4, color: LikhoraColors.primary, fontWeight: '700', fontSize: 13, fontFamily: LikhoraFont.fontFamily },
@@ -1239,4 +1813,128 @@ const styles = StyleSheet.create({
   detailTagText: { color: LikhoraColors.primary, fontSize: 11, fontWeight: '700', fontFamily: LikhoraFont.fontFamily },
   detailMapButton: { marginTop: 20, height: 46, borderRadius: Radius.pill, backgroundColor: LikhoraColors.primary, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
   detailMapText: { color: '#FFFFFF', fontWeight: '800', fontFamily: LikhoraFont.fontFamily },
+  filterSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: Radius.xlarge,
+    borderTopRightRadius: Radius.xlarge,
+    padding: Spacing.four,
+    paddingBottom: Spacing.five,
+  },
+  filterSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E5E7EB',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  filterSheetSub: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    marginTop: 4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterGroupLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    marginTop: 18,
+    marginBottom: 10,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterOptionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOptionChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.pill,
+    backgroundColor: LikhoraColors.inputBackground,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  filterOptionChipActive: {
+    backgroundColor: LikhoraColors.secondaryLavender,
+    borderColor: LikhoraColors.primary,
+  },
+  filterOptionChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterOptionChipTextActive: {
+    color: LikhoraColors.primary,
+  },
+  filterHintText: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    marginTop: 8,
+    lineHeight: 15,
+    fontStyle: 'italic',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 20,
+    paddingVertical: 4,
+  },
+  filterToggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: LikhoraColors.textPrimary,
+    flex: 1,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: LikhoraColors.textPlaceholder,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: LikhoraColors.primary,
+    borderColor: LikhoraColors.primary,
+  },
+  filterActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  filterResetBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: Radius.pill,
+    borderWidth: 1.5,
+    borderColor: LikhoraColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterResetBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  filterApplyBtn: {
+    flex: 2,
+    height: 48,
+    borderRadius: Radius.pill,
+    backgroundColor: LikhoraColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterApplyBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
 });

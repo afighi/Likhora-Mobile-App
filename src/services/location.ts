@@ -3,6 +3,7 @@
  * Covers ALL 17 Regions, ALL 82 Provinces, ALL 1,600+ Cities/Municipalities,
  * and ALL Barangays across the Philippines via live PSGC API endpoints with fallback datasets.
  */
+import * as Location from 'expo-location';
 
 export interface LocationItem {
   code: string;
@@ -156,54 +157,108 @@ export const getBarangaysByCity = (cityCode: string): LocationItem[] => {
 };
 
 /**
+ * Read the device's current GPS coordinates using expo-location. This works
+ * across iOS, Android AND web (expo-location wraps the browser Geolocation
+ * API on web), unlike the previous `navigator.geolocation`-only approach
+ * which silently failed on native and made every native user fall back to a
+ * hardcoded default city.
+ */
+export const getCurrentDeviceCoords = async (): Promise<{ lat: number; lng: number } | null> => {
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    return { lat: position.coords.latitude, lng: position.coords.longitude };
+  } catch (e) {
+    console.warn('Device GPS unavailable:', e);
+    return null;
+  }
+};
+
+/**
  * Detect Device GPS Location & Reverse Geocode to Exact Region, Province, City, Barangay
  */
 export const detectCurrentDeviceLocation = async (): Promise<DetectedLocationResult> => {
-  return new Promise((resolve) => {
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            const { latitude, longitude } = position.coords;
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
-              { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
-            );
-            const data = await res.json();
-            const addr = data.address || {};
+  const coords = await getCurrentDeviceCoords();
+  if (!coords) return getFallbackLocationResult();
 
-            const cityName = addr.city || addr.town || addr.municipality || 'Quezon City';
-            const provinceName = addr.state || addr.province || 'Metro Manila (Second District)';
-            const barangayName = addr.suburb || addr.neighbourhood || addr.quarter || 'Barangay Cubao / Socorro';
+  try {
+    const { lat: latitude, lng: longitude } = coords;
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+      { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
+    );
+    const data = await res.json();
+    const addr = data.address || {};
 
-            const detectedRegion = PHILIPPINE_REGIONS[0]; // NCR or match
-            const provinces = await getProvincesByRegionAsync(detectedRegion.code);
-            const detectedProvince = provinces[0] || { code: '137400000', name: provinceName, regionCode: detectedRegion.code };
+    const cityName = addr.city || addr.town || addr.municipality || 'Quezon City';
+    const provinceName = addr.state || addr.province || 'Metro Manila (Second District)';
+    const barangayName = addr.suburb || addr.neighbourhood || addr.quarter || 'Barangay Cubao / Socorro';
 
-            const cities = await getCitiesByProvinceAsync(detectedProvince.code, detectedRegion.code);
-            const matchedCity = cities.find(c => c.name.toLowerCase().includes(cityName.toLowerCase())) || cities[0] || { code: '137401000', name: cityName, provinceCode: detectedProvince.code };
+    const detectedRegion = PHILIPPINE_REGIONS[0]; // NCR or match
+    const provinces = await getProvincesByRegionAsync(detectedRegion.code);
+    const detectedProvince = provinces[0] || { code: '137400000', name: provinceName, regionCode: detectedRegion.code };
 
-            const barangays = await getBarangaysByCityAsync(matchedCity.code);
-            const matchedBarangay = barangays.find(b => b.name.toLowerCase().includes(barangayName.toLowerCase())) || barangays[0] || { code: '137401001', name: barangayName, cityCode: matchedCity.code };
+    const cities = await getCitiesByProvinceAsync(detectedProvince.code, detectedRegion.code);
+    const matchedCity = cities.find(c => c.name.toLowerCase().includes(cityName.toLowerCase())) || cities[0] || { code: '137401000', name: cityName, provinceCode: detectedProvince.code };
 
-            resolve({
-              region: detectedRegion,
-              province: detectedProvince,
-              city: matchedCity,
-              barangay: matchedBarangay,
-              accuracyText: `Detected via Device GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
-            });
-          } catch (e) {
-            resolve(getFallbackLocationResult());
-          }
-        },
-        () => resolve(getFallbackLocationResult()),
-        { timeout: 8000, enableHighAccuracy: true }
-      );
-    } else {
-      resolve(getFallbackLocationResult());
+    const barangays = await getBarangaysByCityAsync(matchedCity.code);
+    const matchedBarangay = barangays.find(b => b.name.toLowerCase().includes(barangayName.toLowerCase())) || barangays[0] || { code: '137401001', name: barangayName, cityCode: matchedCity.code };
+
+    return {
+      region: detectedRegion,
+      province: detectedProvince,
+      city: matchedCity,
+      barangay: matchedBarangay,
+      accuracyText: `Detected via Device GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`,
+    };
+  } catch (e) {
+    return getFallbackLocationResult();
+  }
+};
+
+// In-memory cache so repeated lookups for the same saved location don't
+// re-hit the geocoding API every render.
+const forwardGeocodeCache = new Map<string, { lat: number; lng: number }>();
+
+/**
+ * Forward-geocode any Philippine city/province/barangay text (e.g. from a
+ * user's saved onboarding profile) into real coordinates via Nominatim.
+ * Replaces the old approach of matching against a ~26-city hardcoded table
+ * that silently defaulted to Bulacan for anywhere else in the country.
+ */
+export const geocodePhilippineLocation = async (
+  query: string
+): Promise<{ lat: number; lng: number } | null> => {
+  const cleaned = query.trim();
+  if (!cleaned) return null;
+
+  const cacheKey = cleaned.toLowerCase();
+  const cached = forwardGeocodeCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(cleaned)}, Philippines`,
+      { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        if (!Number.isNaN(coords.lat) && !Number.isNaN(coords.lng)) {
+          forwardGeocodeCache.set(cacheKey, coords);
+          return coords;
+        }
+      }
     }
-  });
+  } catch (e) {
+    console.warn('Forward geocoding fallback:', e);
+  }
+  return null;
 };
 
 const getFallbackLocationResult = (): DetectedLocationResult => {

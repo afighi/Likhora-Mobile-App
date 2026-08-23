@@ -30,6 +30,13 @@
           "image": "./assets/images/likhoralogo.png",
           "imageWidth": 120
         }
+      ],
+      "expo-image",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Likhora AI uses your location to find accurate, nearby wholesale suppliers and marketplaces."
+        }
       ]
     ],
     "experiments": {

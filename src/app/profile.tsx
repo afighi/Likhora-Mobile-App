@@ -11,23 +11,22 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { 
-  ArrowLeft, 
-  Mail, 
-  Store, 
-  ShieldCheck, 
-  Bell, 
-  HelpCircle, 
-  LogOut, 
-  ChevronRight, 
-  Camera,
+import {
+  ArrowLeft,
+  Mail,
+  Store,
+  ShieldCheck,
+  Bell,
+  HelpCircle,
+  LogOut,
+  ChevronRight,
+  Palette,
   Check,
   MapPin,
   RotateCcw,
   Sparkles,
   Lock,
-  X,
-  AlertTriangle
+  X
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -59,13 +58,13 @@ export default function ProfileScreen() {
   const [budget, setBudget] = useState(userProfile?.budget || '');
 
   // Preferences & Stats States
-  const [pushNotifs, setPushNotifs] = useState(true);
-  const [emailNotifs, setEmailNotifs] = useState(true);
+  const [pushNotifs, setPushNotifs] = useState(userProfile?.push_notifications_enabled ?? true);
+  const [emailNotifs, setEmailNotifs] = useState(userProfile?.email_notifications_enabled ?? true);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   // Custom Modals States
-  const [selectedAvatarColor, setSelectedAvatarColor] = useState('#7C3AED');
+  const [selectedAvatarColor, setSelectedAvatarColor] = useState(userProfile?.avatar_color || '#7C3AED');
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [retakeModalVisible, setRetakeModalVisible] = useState(false);
@@ -85,6 +84,9 @@ export default function ProfileScreen() {
       setBusinessType(userProfile.business_type || '');
       setLocation(userProfile.location || '');
       setBudget(userProfile.budget || '');
+      setSelectedAvatarColor(userProfile.avatar_color || '#7C3AED');
+      setPushNotifs(userProfile.push_notifications_enabled ?? true);
+      setEmailNotifs(userProfile.email_notifications_enabled ?? true);
     }
   }, [userProfile]);
 
@@ -107,6 +109,27 @@ export default function ProfileScreen() {
     setTimeout(() => {
       setToastMessage('');
     }, 3500);
+  };
+
+  // Persists a single preference field immediately (avatar color, push/email
+  // toggles) instead of leaving it as local-only state that resets the next
+  // time this screen mounts.
+  const persistPreference = async (patch: Partial<{
+    avatar_color: string;
+    push_notifications_enabled: boolean;
+    email_notifications_enabled: boolean;
+  }>) => {
+    const uid = userProfile?.id || user?.uid;
+    if (!uid) return;
+    const updatedProfile = {
+      ...userProfile,
+      id: uid,
+      email: userProfile?.email || user?.email || '',
+      full_name: userProfile?.full_name || 'Entrepreneur',
+      ...patch,
+    };
+    setUserProfile(updatedProfile);
+    await syncUserProfile(updatedProfile);
   };
 
   const handleSaveProfile = async () => {
@@ -149,7 +172,18 @@ export default function ProfileScreen() {
       await resetPasswordFirebase(targetEmail);
       setResetMessage(`Password reset link sent to ${targetEmail}. Please check your inbox.`);
     } catch (err: any) {
-      setResetMessage(`Password reset link sent to ${targetEmail}. Please check your inbox.`);
+      // Previously this showed the same "link sent" message even on failure,
+      // silently misleading the user into thinking a reset email went out.
+      const code = err?.code as string | undefined;
+      if (code === 'auth/too-many-requests') {
+        setResetMessage('Too many reset attempts. Please wait a few minutes and try again.');
+      } else if (code === 'auth/network-request-failed') {
+        setResetMessage('Could not reach the server. Check your connection and try again.');
+      } else if (code === 'auth/user-not-found') {
+        setResetMessage(`No account found for ${targetEmail}.`);
+      } else {
+        setResetMessage('Could not send the reset link. Please try again in a moment.');
+      }
     } finally {
       setResetModalVisible(true);
     }
@@ -223,7 +257,7 @@ export default function ProfileScreen() {
                 onPress={() => setAvatarModalVisible(true)}
                 activeOpacity={0.8}
               >
-                <Camera size={12} color="#FFFFFF" />
+                <Palette size={12} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
 
@@ -374,6 +408,7 @@ export default function ProfileScreen() {
                 value={pushNotifs}
                 onValueChange={(val) => {
                   setPushNotifs(val);
+                  void persistPreference({ push_notifications_enabled: val });
                   showToast(val ? 'Push notifications enabled' : 'Push notifications disabled');
                 }}
                 trackColor={{ false: '#E5E7EB', true: LikhoraColors.primary }}
@@ -392,6 +427,7 @@ export default function ProfileScreen() {
                 value={emailNotifs}
                 onValueChange={(val) => {
                   setEmailNotifs(val);
+                  void persistPreference({ email_notifications_enabled: val });
                   showToast(val ? 'Email updates enabled' : 'Email updates disabled');
                 }}
                 trackColor={{ false: '#E5E7EB', true: LikhoraColors.primary }}
@@ -481,6 +517,7 @@ export default function ProfileScreen() {
                   onPress={() => {
                     setSelectedAvatarColor(c);
                     setAvatarModalVisible(false);
+                    void persistPreference({ avatar_color: c });
                     showToast('Avatar theme updated!');
                   }}
                 >

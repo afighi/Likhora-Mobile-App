@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  Modal, 
-  TouchableOpacity, 
-  FlatList, 
-  TextInput, 
-  Pressable 
+import React, { useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  FlatList,
+  TextInput,
+  Pressable,
+  Platform,
 } from 'react-native';
 import { Search, Check, X, ChevronDown } from 'lucide-react-native';
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
@@ -32,6 +33,7 @@ export const SearchableDropdownModal: React.FC<SearchableDropdownModalProps> = (
 }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const triggerRef = useRef<React.ComponentRef<typeof TouchableOpacity>>(null);
 
   const filteredItems = items.filter((item) =>
     item.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -43,18 +45,30 @@ export const SearchableDropdownModal: React.FC<SearchableDropdownModalProps> = (
     setModalVisible(false);
   };
 
+  const openModal = () => {
+    if (disabled) return;
+    // On web, react-native-web marks the rest of the app aria-hidden while the
+    // Modal is open. Blur the trigger first so focus never stays behind on a
+    // now-hidden element (avoids the "Blocked aria-hidden" a11y warning).
+    if (Platform.OS === 'web') {
+      (triggerRef.current as unknown as { blur?: () => void } | null)?.blur?.();
+    }
+    setModalVisible(true);
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.label}>{label}</Text>
       
       {/* Dropdown Trigger Box */}
       <TouchableOpacity
+        ref={triggerRef}
         style={[
           styles.triggerBox,
           disabled && styles.triggerDisabled,
           selectedItem && styles.triggerSelected,
         ]}
-        onPress={() => !disabled && setModalVisible(true)}
+        onPress={openModal}
         disabled={disabled}
         activeOpacity={0.7}
       >
