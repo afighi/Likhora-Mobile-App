@@ -84,6 +84,7 @@ export default function RootLayout() {
             <Stack.Screen name="notifications" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="template-builder" options={{ headerShown: false, animation: 'slide_from_right' }} />
+            <Stack.Screen name="my-templates" options={{ headerShown: false, animation: 'slide_from_right' }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: 'fade' }} />
           </Stack>
         </RootNavigationGate>

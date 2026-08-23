@@ -27,7 +27,6 @@ import {
   Building2,
   Scale,
   ShieldCheck,
-  Trash2,
   Lock,
   Check
 } from 'lucide-react-native';
@@ -36,7 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useNotification } from '@/context/NotificationContext';
-import { deleteRoadmapTask, fetchUserRoadmap, saveUserRoadmap, RoadmapTask, getDefaultPhilippineRoadmapTasks } from '@/services/supabase';
+import { fetchUserRoadmap, saveUserRoadmap, RoadmapTask, getDefaultPhilippineRoadmapTasks } from '@/services/supabase';
 import { askKhoraAI } from '@/services/claude';
 
 // Helper to guarantee authentic legal basis, agency, timeline, cost, required docs, and actionable sub-steps for any task
@@ -183,7 +182,6 @@ export default function RoadmapTab() {
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<RoadmapTask[]>([]);
   const [selectedTaskModal, setSelectedTaskModal] = useState<RoadmapTask | null>(null);
-  const [taskPendingDeletion, setTaskPendingDeletion] = useState<RoadmapTask | null>(null);
   const [aiAdviceModal, setAiAdviceModal] = useState<{ title: string; advice: string } | null>(null);
   const [taskAiAdviceMap, setTaskAiAdviceMap] = useState<Record<string, string>>({});
   const [loadingAi, setLoadingAi] = useState<string | null>(null);
@@ -332,25 +330,6 @@ export default function RoadmapTab() {
     setShowTemplates(false);
 
     Alert.alert('New Roadmap Started!', `Switched active launch plan to "${templateName}". Real Philippine legal steps are now loaded.`);
-  };
-
-  const removeTask = (task: RoadmapTask) => {
-    if (!user?.uid || (!task.id && !task.client_key)) return;
-    setTaskPendingDeletion(task);
-  };
-
-  const confirmRemoveTask = async () => {
-    if (!user?.uid || !taskPendingDeletion) return;
-
-    const task = taskPendingDeletion;
-    const { error } = await deleteRoadmapTask(user.uid, task.id, task.client_key || task.id);
-    if (error) {
-      Alert.alert('Could not delete task', 'Please try again.');
-      return;
-    }
-
-    setTasks((current) => current.filter((item) => item.id !== task.id && item.client_key !== task.client_key));
-    setTaskPendingDeletion(null);
   };
 
   // Calculate Progress
@@ -609,10 +588,15 @@ export default function RoadmapTab() {
           <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
         </View>
 
-        <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
-          <Plus size={16} color="#FFFFFF" />
-          <Text style={styles.customTaskButtonText}>Create your own template</Text>
-        </TouchableOpacity>
+        <View style={styles.templateActionsRow}>
+          <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
+            <Plus size={16} color="#FFFFFF" />
+            <Text style={styles.customTaskButtonText}>Create your own template</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.myTemplatesButton} onPress={() => router.push('/my-templates')} activeOpacity={0.8}>
+            <Bookmark size={16} color={LikhoraColors.primary} />
+          </TouchableOpacity>
+        </View>
 
         {/* 2. SEGMENTED CONTROL & CATEGORY FILTERS */}
         <View style={styles.segmentedControlContainer}>
@@ -815,31 +799,6 @@ export default function RoadmapTab() {
           </ScrollView>
         )}
 
-        <Modal
-          visible={Boolean(taskPendingDeletion)}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setTaskPendingDeletion(null)}
-        >
-          <View style={[styles.popupOverlay, styles.deleteConfirmOverlay]}>
-            <View style={[styles.customTaskModal, styles.deleteConfirmModal]}>
-              <Text style={styles.customTaskModalTitle}>Delete task?</Text>
-              <Text style={styles.customTaskModalSub}>
-                Remove “{taskPendingDeletion?.title}” from your roadmap? This cannot be undone.
-              </Text>
-              <View style={styles.customTaskActions}>
-                <TouchableOpacity style={styles.customTaskCancel} onPress={() => setTaskPendingDeletion(null)}>
-                  <Text style={styles.customTaskCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.deleteConfirmButton} onPress={confirmRemoveTask}>
-                  <Trash2 size={16} color="#FFFFFF" />
-                  <Text style={styles.deleteConfirmButtonText}>Delete</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
         {/* ------------------------------------------------------------------ */}
         {/* REAL LEGAL PROCESS POP-UP MODAL WINDOW                             */}
         {/* ------------------------------------------------------------------ */}
@@ -1033,27 +992,13 @@ export default function RoadmapTab() {
                     </TouchableOpacity>
                   )}
 
-                  <View style={styles.popupFooterBottomRow}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        const task = selectedTaskModal;
-                        setSelectedTaskModal(null);
-                        removeTask(task);
-                      }}
-                      activeOpacity={0.7}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.removeStepLinkText}>Remove this step</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.closeDoneBtn}
-                      onPress={() => setSelectedTaskModal(null)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.closeDoneBtnText}>Done</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.closeDoneBtn}
+                    onPress={() => setSelectedTaskModal(null)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.closeDoneBtnText}>Done</Text>
+                  </TouchableOpacity>
                 </View>
 
               </View>
@@ -1068,9 +1013,15 @@ export default function RoadmapTab() {
 }
 
 const styles = StyleSheet.create({
-  customTaskButton: {
+  templateActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginHorizontal: Spacing.four,
     marginTop: Spacing.three,
+  },
+  customTaskButton: {
+    flex: 1,
     backgroundColor: LikhoraColors.primary,
     borderRadius: Radius.pill,
     height: 42,
@@ -1079,73 +1030,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 7,
   },
+  myTemplatesButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: LikhoraColors.secondaryLavender,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: LikhoraColors.softPurple,
+  },
   customTaskButtonText: {
     color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 13,
     fontFamily: LikhoraFont.fontFamily,
   },
-  deleteTaskBtn: {
-    width: 42,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'flex-end',
-    marginLeft: 8,
-    borderRadius: Radius.medium,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  deleteConfirmOverlay: {
-    justifyContent: 'center',
-    padding: Spacing.four,
-  },
-  deleteConfirmModal: {
-    width: '100%',
-  },
-  deleteConfirmButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: LikhoraColors.errorRed,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: Radius.pill,
-  },
-  deleteConfirmButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontFamily: LikhoraFont.fontFamily,
-  },
-  customTaskModal: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: Radius.xlarge,
-    padding: Spacing.four,
-  },
-  customTaskModalTitle: {
-    color: LikhoraColors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
-    fontFamily: LikhoraFont.fontFamily,
-  },
-  customTaskModalSub: {
-    color: LikhoraColors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
-    marginBottom: 14,
-    fontFamily: LikhoraFont.fontFamily,
-  },
-  customTaskActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 6,
-  },
-  customTaskCancel: { padding: 12 },
-  customTaskCancelText: { color: LikhoraColors.primary, fontWeight: '800', fontFamily: LikhoraFont.fontFamily },
-
   // -----------------------------------------------------------------------
   // Guided sequential stepper (My Journey view)
   // -----------------------------------------------------------------------
@@ -1310,6 +1210,7 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textPlaceholder,
   },
   lockedFooterHint: {
+    flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1321,17 +1222,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: LikhoraColors.textSecondary,
-    fontFamily: LikhoraFont.fontFamily,
-  },
-  popupFooterBottomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  removeStepLinkText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: LikhoraColors.errorRed,
     fontFamily: LikhoraFont.fontFamily,
   },
   safeArea: {
@@ -2005,12 +1895,7 @@ const styles = StyleSheet.create({
     fontFamily: LikhoraFont.fontFamily,
   },
   popupFooter: {
-    // Stacks the "Mark Complete" button above the "Remove this step / Done"
-    // row. This used to be flexDirection: 'row' back when the footer only
-    // held two side-by-side buttons — now that it holds two stacked
-    // sections, 'row' squeezed them side-by-side instead, which is what
-    // caused the overlapping "Remove this step" / "Done" text.
-    flexDirection: 'column',
+    flexDirection: 'row',
     gap: 10,
     paddingVertical: Spacing.three,
     borderTopWidth: 1,
