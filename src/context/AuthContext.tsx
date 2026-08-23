@@ -36,11 +36,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(firebaseUser);
       if (firebaseUser) {
         // Fetch or create profile in Supabase
-        const { data: profile } = await fetchUserProfile(firebaseUser.uid);
+        const { data: profile, error: profileError } = await fetchUserProfile(firebaseUser.uid);
         if (profile) {
           setUserProfile(profile);
           setOnboardingCompleted(profile.onboarded ?? false);
         } else {
+          // This branch is meant for genuinely new users, but a failed/blocked
+          // request (bad token, RLS misconfiguration, network issue) looks
+          // identical — "no data" — and was silently falling through to the
+          // same "treat as brand new" path, resetting onboarding for an
+          // existing user every time the read failed. Logging the real
+          // error here (previously discarded) makes that distinguishable.
+          if (profileError) {
+            console.warn('[AuthContext] fetchUserProfile failed — falling back to a new-profile state. This should NOT happen for an existing user:', profileError);
+          }
           // Initialize fallback profile
           const newProfile: UserProfile = {
             id: firebaseUser.uid,
@@ -50,7 +59,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           setUserProfile(newProfile);
           setOnboardingCompleted(false);
-          await syncUserProfile(newProfile);
+          const { error: syncError } = await syncUserProfile(newProfile);
+          if (syncError) {
+            console.warn('[AuthContext] Writing the fallback profile also failed:', syncError);
+          }
         }
       } else {
         setUserProfile(null);
