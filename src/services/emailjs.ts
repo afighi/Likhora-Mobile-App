@@ -1,7 +1,7 @@
 // EmailJS Integration for Likhora AI
 const EMAILJS_SERVICE_ID = 'service_i7ikkwo';
 const EMAILJS_TEMPLATE_ID = 'template_yjczdil';
-const EMAILJS_USER_ID = 'user_likhora_pub_key'; // Fallback public key / REST placeholder
+const EMAILJS_PUBLIC_KEY = 'hZiZiKjk1A4DdK8X7';
 
 export const generateOTPCode = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -12,9 +12,10 @@ export const sendOTPEmail = async (toEmail: string, otpCode: string, userName?: 
     const payload = {
       service_id: EMAILJS_SERVICE_ID,
       template_id: EMAILJS_TEMPLATE_ID,
-      user_id: EMAILJS_USER_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
       template_params: {
         to_email: toEmail,
+        to_name: userName || 'Valued Entrepreneur',
         user_email: toEmail,
         user_name: userName || 'Valued Entrepreneur',
         otp_code: otpCode,
@@ -32,17 +33,19 @@ export const sendOTPEmail = async (toEmail: string, otpCode: string, userName?: 
       body: JSON.stringify(payload)
     });
 
-    if (res.ok || res.status === 200) {
+    if (res.ok) {
       return { success: true, message: 'OTP sent successfully to ' + toEmail };
-    } else {
-      const text = await res.text();
-      console.log('EmailJS response note:', res.status, text);
-      // Even if EmailJS returns status note due to server credentials key check, 
-      // we provide a smooth user experience by returning success so testing/verification flows seamlessly.
-      return { success: true, message: `OTP code generated and dispatched to ${toEmail}` };
     }
+
+    // Surface the real failure instead of pretending it worked — a bad key,
+    // wrong service/template ID, or an origin restriction on the EmailJS
+    // account all land here, and hiding them just strands the user on the
+    // OTP screen waiting for an email that was never sent.
+    const text = await res.text();
+    console.warn('EmailJS send failed:', res.status, text);
+    return { success: false, message: `Failed to send OTP (EmailJS ${res.status}): ${text}` };
   } catch (error: any) {
-    console.warn('EmailJS network note:', error);
-    return { success: true, message: `OTP verification code dispatched to ${toEmail}` };
+    console.warn('EmailJS network error:', error);
+    return { success: false, message: 'Failed to send OTP — check your network connection and try again.' };
   }
 };

@@ -13,21 +13,18 @@ export const AppLogo: React.FC<AppLogoProps> = ({
   style,
   imageStyle,
 }) => {
-  // likhoralogo.png dimensions: 1024 x 1536 (aspect ratio ~0.667)
-  const imageWidth = size * (1024 / 1536);
-  // Account for ~69px transparent padding on left of 1024px canvas
-  const flushLeftOffset = -Math.round(size * (69 / 1536));
-
+  // likhoralogo-mark.png is a square, tightly-cropped, transparent-background
+  // crop of the app icon (background removed so it drops cleanly onto any
+  // screen color instead of showing a white box behind it).
   return (
     <View style={[styles.container, style]}>
       <Image
-        source={require('@/assets/images/likhoralogo.png')}
+        source={require('@/assets/images/likhoralogo-mark.png')}
         resizeMode="contain"
         style={[
           {
-            width: imageWidth,
+            width: size,
             height: size,
-            marginLeft: flushLeftOffset,
           },
           imageStyle,
         ]}

@@ -1,6 +1,19 @@
-// Khora AI Integration for Likhora AI
-// API keys belong on a server, never in the Expo client bundle. Configure this
-// public URL to point to a server endpoint that securely calls Anthropic.
+// Khora AI Integration for Likhora AI.
+//
+// The Anthropic key lives on the server, never in the Expo bundle — the app
+// talks to the "khora-ai" Supabase Edge Function, which holds the key as a
+// secret and decides the model, effort and token ceiling itself.
+//
+// Every call falls back to the local advisor below when the function is
+// unreachable, so the app still answers offline. That fallback is keyword
+// matched, not generated: callers that need structured output (pricingAdvisor,
+// onboardingAdvisor, supplierAdvisor) detect the difference by failing to
+// parse JSON out of it, and use their own deterministic path instead.
+
+import { supabase } from './supabase';
+
+// Optional override for anyone self-hosting their own endpoint instead of
+// using the Edge Function.
 const KHORA_AI_ENDPOINT = process.env.EXPO_PUBLIC_KHORA_AI_ENDPOINT;
 
 export interface AIResponse {
@@ -9,35 +22,40 @@ export interface AIResponse {
   error?: string;
 }
 
-export const askKhoraAI = async (prompt: string, systemPrompt?: string): Promise<AIResponse> => {
-  const payload = {
-    model: 'claude-3-5-sonnet-20241022',
-    max_tokens: 1024,
-    system: systemPrompt || 'You are Khora AI, an expert, warm, and highly intelligent Filipino small business growth and legal compliance assistant. Answer every question directly, dynamically, and intelligently in simple Taglish or English. Address greetings politely, generate creative business names when asked, explain Philippine business laws (DTI, Barangay, BIR, Mayor Permit, BMBE), and assist with product costing.',
-    messages: [
-      { role: 'user', content: prompt }
-    ]
-  };
+/** Pulls the reply text out of Anthropic's response shape. */
+const readReplyText = (data: any): string | null => {
+  const text = data?.content?.[0]?.text;
+  return typeof text === 'string' && text.trim() ? text : null;
+};
 
-  // 1. Live API execution through a server endpoint, when configured.
-  if (KHORA_AI_ENDPOINT) {
-    try {
+export const askKhoraAI = async (prompt: string, systemPrompt?: string): Promise<AIResponse> => {
+  // 1. Live response, via the Edge Function (or a self-hosted endpoint).
+  try {
+    if (KHORA_AI_ENDPOINT) {
       const response = await fetch(KHORA_AI_ENDPOINT, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, system: systemPrompt }),
       });
 
       if (response.ok) {
-        const data = await response.json();
-        const replyText = data.content?.[0]?.text || data.content;
-        if (replyText) {
-          return { content: replyText, success: true };
-        }
+        const replyText = readReplyText(await response.json());
+        if (replyText) return { content: replyText, success: true };
       }
-    } catch {
-      // Fall back to the local advisor when the optional service is unavailable.
+    } else {
+      const { data, error } = await supabase.functions.invoke('khora-ai', {
+        body: { prompt, system: systemPrompt },
+      });
+
+      if (!error) {
+        const replyText = readReplyText(data);
+        if (replyText) return { content: replyText, success: true };
+      } else {
+        console.warn('Khora AI function error:', error);
+      }
     }
+  } catch (err) {
+    console.warn('Khora AI unreachable, using local advisor:', err);
   }
 
   // 2. Intelligent Contextual Natural Language AI Engine

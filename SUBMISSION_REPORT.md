@@ -339,7 +339,7 @@ graph TD
 
 ![System Flowchart Diagram](./assets/system_flowchart_diagram.png)
 
-The operational flowchart illustrates the user lifecycle and explicit data operations mapped directly to the 6 PostgreSQL tables defined in the ERD (`public.profiles`, `public.roadmaps`, `public.notifications`, `public.suppliers`, `public.community_posts`, and `public.community_template_favorites`):
+The operational flowchart illustrates the user lifecycle and explicit data operations mapped directly to the 9 PostgreSQL tables defined in the ERD (`public.profiles`, `public.roadmaps`, `public.notifications`, `public.suppliers`, `public.community_posts`, `public.community_template_favorites`, `public.user_templates`, `public.products`, and `public.password_reset_otps`):
 
 ```mermaid
 flowchart TD
@@ -398,7 +398,9 @@ flowchart TD
 
 ## 7. Detailed Entity Relationship Diagram (ERD) & Database Schema
 
-The database for **Likhora AI** is built on Supabase Cloud (PostgreSQL), consisting of 7 core relational tables: `profiles`, `roadmaps`, `notifications`, `suppliers`, `community_posts`, `community_template_favorites`, and `user_templates`. All tables except `suppliers` and `community_posts`/`community_template_favorites` (intentionally public/shared) are protected by Row Level Security tied to the authenticated Firebase user (see Section 1E).
+The database for **Likhora AI** is built on Supabase Cloud (PostgreSQL), consisting of 9 core relational tables: `profiles`, `roadmaps`, `notifications`, `suppliers`, `community_posts`, `community_template_favorites`, `user_templates`, `products`, and `password_reset_otps`. All tables except `suppliers` and `community_posts`/`community_template_favorites` (intentionally public/shared) are protected by Row Level Security tied to the authenticated Firebase user (see Section 1E).
+
+`password_reset_otps` is stricter still: RLS is enabled with **zero policies**, so no client role can read or write it at all. It is reachable only by the `password-reset` Edge Function, which runs with the service role. That isolation is deliberate — a reset code readable from the client would be an account-takeover path.
 
 ### A. Visual Entity Relationship Diagram (ERD)
 
@@ -421,9 +423,43 @@ erDiagram
         timestamp updated_at "Last Profile Update Timestamp"
         integer onboarding_step "Current Onboarding Step"
         text onboarding_draft "Draft JSON / Progress Data"
-        text avatar_color "Profile Avatar Color Preference"
+        text avatar_color "Fallback colour behind user initials"
+        text avatar_url "Profile photo URL (avatars storage bucket)"
         boolean push_notifications_enabled "Push Notification Preference"
         boolean email_notifications_enabled "Email Notification Preference"
+    }
+
+    products {
+        uuid id PK "Product Unique ID"
+        text user_id FK "Owner User ID (profiles.id)"
+        text name "Product Name"
+        text category "Category inferred by Khora AI"
+        text business_key "Roadmap this price book belongs to"
+        text purchase_mode "piece | pack | case | kilo | liter"
+        numeric bulk_quantity "Total quantity bought (kilo/liter modes)"
+        numeric bulk_portion_size "Size of one sellable portion"
+        numeric bulk_pieces_yielded "Derived piece count"
+        numeric dagdag_gastos_per_piece "Extra cost per piece"
+        numeric puhunan "Base cost per piece"
+        numeric total_cost_per_piece "Cost incl. extra costs"
+        numeric selling_price "Final price (AI suggested or adjusted)"
+        numeric tubo_per_piece "Profit per piece"
+        numeric margin_percent "Profit as % of price"
+        numeric breakeven_units "Units to recover capital"
+        text ai_reasoning "Khora AI explanation for the price"
+        text price_source "ai | manual"
+        timestamp created_at "Creation Timestamp"
+        timestamp updated_at "Last Update Timestamp"
+    }
+
+    password_reset_otps {
+        uuid id PK "Reset Request ID"
+        text email "Requesting email address"
+        text code_hash "SHA-256 of the 6-digit code"
+        timestamp expires_at "10-minute expiry"
+        integer attempts "Failed verification count (max 5)"
+        timestamp consumed_at "Set once used or superseded"
+        timestamp created_at "Creation Timestamp"
     }
 
     user_templates {
@@ -503,8 +539,13 @@ erDiagram
     profiles ||--o{ community_posts : "authors (1:N author_id)"
     profiles ||--o{ community_template_favorites : "favorites (1:N user_id)"
     profiles ||--o{ user_templates : "owns (1:N user_id)"
+    profiles ||--o{ products : "prices (1:N user_id)"
     community_posts ||--o{ community_template_favorites : "favorited_by (1:N post_id)"
 ```
+
+> `password_reset_otps` is intentionally unrelated to `profiles`: it is keyed by
+> email rather than by user id, because a person resetting their password is not
+> authenticated yet and has no session to join on.
 
 ### B. Detailed PostgreSQL DDL Schema Definitions
 

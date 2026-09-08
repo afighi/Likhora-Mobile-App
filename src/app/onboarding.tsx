@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -9,7 +9,8 @@ import {
   Platform, 
   TextInput,
   ActivityIndicator,
-  Animated
+  Animated,
+  Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { 
@@ -17,12 +18,10 @@ import {
   Sparkles, 
   Check, 
   Utensils, 
-  Coffee, 
   Store, 
   Globe, 
   Wrench, 
   ShoppingBag, 
-  Truck, 
   PlusCircle, 
   MapPin, 
   Info, 
@@ -39,10 +38,17 @@ import {
   saveOnboardingStepProgress,
   getDefaultPhilippineRoadmapTasks,
   tailorRoadmapTasks,
-  RISK_CONTINGENCIES,
   RoadmapTask,
   OnboardingAnswers,
 } from '@/services/supabase';
+import {
+  BUSINESS_PROFILES,
+  BusinessProfile,
+  CUSTOM_BUSINESS_ID,
+  GENERIC_PROFILE,
+  getBusinessProfile,
+} from '@/services/businessProfiles';
+import { generateCustomBusinessProfile } from '@/services/onboardingAdvisor';
 import { 
   PHILIPPINE_REGIONS, 
   getProvincesByRegionAsync, 
@@ -54,6 +60,16 @@ import {
   AILocationAnalysis 
 } from '@/services/location';
 import { SearchableDropdownModal } from '@/components/ui/SearchableDropdownModal';
+
+// businessProfiles.ts stays UI-free, so it names an icon and this maps it.
+const PROFILE_ICONS = {
+  store: Store,
+  utensils: Utensils,
+  globe: Globe,
+  wrench: Wrench,
+  'shopping-bag': ShoppingBag,
+  'plus-circle': PlusCircle,
+} as const;
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -90,6 +106,13 @@ export default function OnboardingScreen() {
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
   const [differentiator, setDifferentiator] = useState('');
   const [researchStage, setResearchStage] = useState('');
+  // Answers to the business-type-specific questions, keyed by question id.
+  const [extraAnswers, setExtraAnswers] = useState<{ [id: string]: string }>({});
+
+  // Custom business types have no hand-written profile, so Khora builds one.
+  const [customProfile, setCustomProfile] = useState<BusinessProfile | null>(null);
+  const [generatingProfile, setGeneratingProfile] = useState(false);
+  const [profileFromAI, setProfileFromAI] = useState(false);
 
   // STEP 5 State: Finances
   const [startingBudget, setStartingBudget] = useState('');
@@ -139,12 +162,52 @@ export default function OnboardingScreen() {
           if (draft.obtainedPermits) setObtainedPermits(draft.obtainedPermits);
           if (draft.insuranceStatus) setInsuranceStatus(draft.insuranceStatus);
           if (draft.selectedRisks) setSelectedRisks(draft.selectedRisks);
+          if (draft.extraAnswers) setExtraAnswers(draft.extraAnswers);
         } catch (e) {
           console.warn('Error parsing saved onboarding draft:', e);
         }
       }
     }
   }, [userProfile]);
+
+  // The profile driving every business-specific question and the two
+  // operational roadmap tasks. A built-in type resolves instantly; a custom
+  // one waits on Khora, falling back to neutral copy until it arrives.
+  const activeProfile: BusinessProfile = useMemo(() => {
+    if (selectedCategory === CUSTOM_BUSINESS_ID) {
+      const typed = customCategory.trim();
+      return customProfile || { ...GENERIC_PROFILE, id: typed || GENERIC_PROFILE.id, label: typed || GENERIC_PROFILE.label };
+    }
+    return getBusinessProfile(selectedCategory);
+  }, [selectedCategory, customCategory, customProfile]);
+
+  // Contingency copy for exactly the risks this user was shown, so the roadmap
+  // and the on-screen plan can never disagree.
+  const riskContingencies = useMemo(
+    () => Object.fromEntries(activeProfile.risks.map((r) => [r.risk, r.contingency])),
+    [activeProfile]
+  );
+
+  /**
+   * Kicks off Khora's profile build for a custom business type. Fired when the
+   * user leaves step 1, so by the time they reach step 4 the tailored
+   * questions are usually already there.
+   */
+  const ensureCustomProfile = async () => {
+    const typed = customCategory.trim();
+    if (selectedCategory !== CUSTOM_BUSINESS_ID || !typed) return;
+    if (customProfile?.id === typed) return; // already built for this exact input
+
+    setGeneratingProfile(true);
+    try {
+      const locationText = selectedCity?.name || selectedProvince?.name || null;
+      const { profile, source } = await generateCustomBusinessProfile(typed, locationText);
+      setCustomProfile(profile);
+      setProfileFromAI(source === 'khora-ai');
+    } finally {
+      setGeneratingProfile(false);
+    }
+  };
 
   const animateToStep = (newStep: number) => {
     Animated.sequence([
@@ -189,6 +252,7 @@ export default function OnboardingScreen() {
         obtainedPermits,
         insuranceStatus,
         selectedRisks,
+        extraAnswers,
       };
       const profileWithProgress = {
         id: user.uid,
@@ -314,7 +378,11 @@ export default function OnboardingScreen() {
 
     try {
       const finalCategory = selectedCategory === 'other' ? customCategory.trim() : selectedCategory;
-      const locationString = selectedCity ? `${selectedCity.name}, ${selectedProvince?.name || 'Philippines'}` : 'Philippines';
+      // shortName over name: for Metro Manila, `name` deliberately lists every
+      // city in the district (e.g. "Metro Manila (Second District - QC,
+      // Mandaluyong, Marikina, Pasig, San Juan)") so it's identifiable in the
+      // picker — far too long to store as the user's actual location text.
+      const locationString = selectedCity ? `${selectedCity.name}, ${selectedProvince?.shortName || selectedProvince?.name || 'Philippines'}` : 'Philippines';
 
       // The complete set of answers from every step, used both as the
       // persisted record of this user's onboarding and to tailor their
@@ -338,11 +406,13 @@ export default function OnboardingScreen() {
         obtainedPermits,
         insuranceStatus,
         selectedRisks,
+        extraAnswers,
+        aiTailored: profileFromAI,
       };
 
       // 1. Sync User Profile in Supabase, including the finalized answers
       if (user) {
-        await syncUserProfile({
+        const { error: profileSyncError } = await syncUserProfile({
           id: user.uid,
           email: userProfile?.email || user.email || '',
           full_name: userProfile?.full_name || 'Entrepreneur',
@@ -355,12 +425,34 @@ export default function OnboardingScreen() {
           onboarding_draft: JSON.stringify(finalAnswers),
         });
 
+        if (profileSyncError) {
+          // If `onboarded: true` never actually reaches Supabase, the local
+          // state below still says "done" for this session — but the next
+          // time AuthContext fetches this profile (a reload, another
+          // device, a fresh web session) it reads the real row, sees
+          // onboarded still false, and sends the user straight back through
+          // onboarding despite having just finished it. Surface the failure
+          // and let them retry instead of silently pretending it worked.
+          throw profileSyncError;
+        }
+
         // 2. Generate the default checklist, then tailor it to this user's
         //    actual answers (skip permits already obtained, swap DTI for SEC
         //    when incorporating, append a risk-contingency task), and save it.
-        const defaultTasks: RoadmapTask[] = getDefaultPhilippineRoadmapTasks(user.uid, finalCategory, locationString);
-        const roadmapTasks: RoadmapTask[] = tailorRoadmapTasks(defaultTasks, finalAnswers);
-        await saveUserRoadmap(roadmapTasks);
+        const defaultTasks: RoadmapTask[] = getDefaultPhilippineRoadmapTasks(
+          user.uid,
+          finalCategory,
+          locationString,
+          activeProfile
+        );
+        const roadmapTasks: RoadmapTask[] = tailorRoadmapTasks(defaultTasks, finalAnswers, riskContingencies);
+        const { error: roadmapError } = await saveUserRoadmap(roadmapTasks);
+        if (roadmapError) {
+          // Non-fatal: saveUserRoadmap already writes the tailored tasks to
+          // the local cache before it touches Supabase, so the roadmap tab
+          // still has the right, tailored content even if this sync failed.
+          console.warn('[Onboarding] Roadmap sync to Supabase failed, continuing on local cache:', roadmapError);
+        }
       }
 
       setUserProfile({
@@ -378,9 +470,15 @@ export default function OnboardingScreen() {
       setOnboardingCompleted(true);
       router.replace('/suppliers');
     } catch (e) {
-      console.warn('Onboarding save note:', e);
-      setOnboardingCompleted(true);
-      router.replace('/suppliers');
+      console.warn('Onboarding save failed:', e);
+      // Send them back to the last real step (not stuck on the "Building
+      // your plan" loader) so Finish can be tapped again once whatever
+      // failed (usually connectivity) is resolved.
+      animateToStep(7);
+      Alert.alert(
+        "Couldn't save your setup",
+        "We weren't able to save your onboarding to the cloud, so it won't stick yet. Check your connection and tap Finish again."
+      );
     }
   };
 
@@ -452,15 +550,18 @@ export default function OnboardingScreen() {
   // ----------------------------------------------------
   // MAIN 7-STEP ONBOARDING RENDER
   // ----------------------------------------------------
+  // The five most common Philippine micro-businesses, plus a custom option.
+  // Deliberately short: a long list makes people pick the closest wrong thing,
+  // and everything outside these five is better served by Khora building a
+  // profile around what the user actually types.
   const CATEGORY_OPTIONS = [
-    { id: 'Carinderia', label: 'Carinderia', icon: Utensils, desc: 'Eateries, food stalls & snacks' },
-    { id: 'Food Stall', label: 'Food Stall', icon: Coffee, desc: 'Kiosks, food carts & drinks' },
-    { id: 'Sari-sari Store', label: 'Sari-sari Store', icon: Store, desc: 'Neighborhood retail & groceries' },
-    { id: 'Online Shop', label: 'Online Shop', icon: Globe, desc: 'E-commerce & digital products' },
-    { id: 'Services', label: 'Services', icon: Wrench, desc: 'Laundry, repair, salon & print' },
-    { id: 'Clothing & RTW', label: 'Clothing & RTW', icon: ShoppingBag, desc: 'Apparel, accessories & tailoring' },
-    { id: 'Delivery / Rides', label: 'Delivery / Rides', icon: Truck, desc: 'Transport, logistics & courier' },
-    { id: 'other', label: 'Something else', icon: PlusCircle, desc: 'Specify custom business' },
+    ...BUSINESS_PROFILES.map((profile) => ({
+      id: profile.id,
+      label: profile.label,
+      icon: PROFILE_ICONS[profile.iconName],
+      desc: profile.desc,
+    })),
+    { id: CUSTOM_BUSINESS_ID, label: 'Something else', icon: PlusCircle, desc: 'Tell us, and Khora tailors the rest' },
   ];
 
   return (
@@ -747,11 +848,36 @@ export default function OnboardingScreen() {
             {/* STEP 4: MARKET & PRODUCT */}
             {step === 4 && (
               <View>
-                <Text style={styles.eyebrow}>MARKET & PRODUCT</Text>
-                <Text style={styles.stepTitle}>Who will buy from you?</Text>
+                <Text style={styles.eyebrow}>
+                  {activeProfile.isProductBased ? 'MARKET & PRODUCT' : 'MARKET & SERVICE'}
+                </Text>
+                <Text style={styles.stepTitle}>
+                  {activeProfile.isProductBased ? 'Who will buy from you?' : 'Who will book your service?'}
+                </Text>
+
+                {/* A custom business type has its questions written by Khora,
+                    which takes a moment — say so rather than briefly showing
+                    generic options and swapping them out underneath the user. */}
+                {generatingProfile && (
+                  <View style={styles.tailoringCard}>
+                    <ActivityIndicator size="small" color={LikhoraColors.primary} style={{ marginRight: 10 }} />
+                    <Text style={styles.tailoringText}>
+                      Khora is tailoring these questions for your {customCategory.trim() || 'business'}...
+                    </Text>
+                  </View>
+                )}
+
+                {!generatingProfile && profileFromAI && (
+                  <View style={styles.tailoredBadge}>
+                    <Sparkles size={13} color={LikhoraColors.aiBlue} style={{ marginRight: 6 }} />
+                    <Text style={styles.tailoredBadgeText}>
+                      Khora tailored these questions for {activeProfile.label}
+                    </Text>
+                  </View>
+                )}
 
                 <View style={styles.optionsList}>
-                  {['Students', 'Office Workers', 'Local Residents', 'Commuters', 'Online Shoppers'].map((group) => {
+                  {activeProfile.customerSegments.map((group) => {
                     const isSelected = selectedCustomers.includes(group);
                     return (
                       <TouchableOpacity
@@ -775,10 +901,14 @@ export default function OnboardingScreen() {
                 </View>
 
                 <View style={styles.questionGroup}>
-                  <Text style={styles.questionLabel}>What makes your business different?</Text>
+                  <Text style={styles.questionLabel}>
+                    {activeProfile.isProductBased
+                      ? 'What makes your business different?'
+                      : 'Why will they choose you?'}
+                  </Text>
                   <TextInput
                     style={[styles.textInput, { height: 80, textAlignVertical: 'top' }]}
-                    placeholder="e.g. Cheaper price, special secret sauce, 24/7 delivery..."
+                    placeholder={activeProfile.differentiatorPlaceholder}
                     placeholderTextColor={LikhoraColors.textPlaceholder}
                     value={differentiator}
                     onChangeText={setDifferentiator}
@@ -789,12 +919,7 @@ export default function OnboardingScreen() {
                 <View style={styles.questionGroup}>
                   <Text style={styles.questionLabel}>How far have you gone with your market research?</Text>
                   <View style={styles.optionsList}>
-                    {[
-                      { id: 'not_yet', label: 'Not yet' },
-                      { id: 'asked', label: 'Asked around friends/neighbors' },
-                      { id: 'checked', label: 'Checked nearby competitors' },
-                      { id: 'sold', label: 'Already sold test products' },
-                    ].map((item) => {
+                    {activeProfile.researchStages.map((item) => {
                       const isSelected = researchStage === item.id;
                       return (
                         <TouchableOpacity
@@ -814,6 +939,45 @@ export default function OnboardingScreen() {
                     })}
                   </View>
                 </View>
+
+                {/* Questions that only make sense for THIS kind of business —
+                    hand-written for the five built-in types, generated by
+                    Khora for anything else. */}
+                {activeProfile.extraQuestions.map((question) => (
+                  <View key={question.id} style={styles.questionGroup}>
+                    <Text style={styles.questionLabel}>{question.label}</Text>
+                    {question.type === 'text' ? (
+                      <TextInput
+                        style={styles.textInput}
+                        placeholder={question.placeholder || 'Your answer...'}
+                        placeholderTextColor={LikhoraColors.textPlaceholder}
+                        value={extraAnswers[question.id] || ''}
+                        onChangeText={(text) => setExtraAnswers({ ...extraAnswers, [question.id]: text })}
+                      />
+                    ) : (
+                      <View style={styles.optionsList}>
+                        {(question.options || []).map((option) => {
+                          const isSelected = extraAnswers[question.id] === option;
+                          return (
+                            <TouchableOpacity
+                              key={option}
+                              style={[styles.optionCard, isSelected && styles.optionCardSelected]}
+                              onPress={() => setExtraAnswers({ ...extraAnswers, [question.id]: option })}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                                {option}
+                              </Text>
+                              <View style={[styles.radioCircle, isSelected && styles.radioCircleSelected]}>
+                                {isSelected && <Check size={12} color="#FFFFFF" strokeWidth={3} />}
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
+                ))}
               </View>
             )}
 
@@ -950,7 +1114,7 @@ export default function OnboardingScreen() {
                     Leave blank if you haven't started yet — we'll add what you need to your roadmap.
                   </Text>
                   <View style={styles.optionsList}>
-                    {['DTI', 'Barangay clearance', "Mayor's / Business Permit", 'BIR', 'Sanitary Permit', 'Fire Safety requirements'].map((p) => {
+                    {activeProfile.permits.map((p) => {
                       const isSelected = obtainedPermits.includes(p);
                       return (
                         <TouchableOpacity
@@ -1005,7 +1169,7 @@ export default function OnboardingScreen() {
                 <Text style={styles.stepSubTitle}>Select all that apply. We will generate instant contingency plans.</Text>
 
                 <View style={styles.optionsList}>
-                  {Object.keys(RISK_CONTINGENCIES).map((risk) => {
+                  {activeProfile.risks.map(({ risk }) => {
                     const isSelected = selectedRisks.includes(risk);
                     return (
                       <TouchableOpacity
@@ -1037,7 +1201,7 @@ export default function OnboardingScreen() {
                       <View key={risk} style={styles.contingencyItem}>
                         <Text style={styles.contingencyRiskLabel}>Risk: {risk}</Text>
                         <Text style={styles.contingencyActionText}>
-                          Action: {RISK_CONTINGENCIES[risk]}
+                          Action: {riskContingencies[risk]}
                         </Text>
                       </View>
                     ))}
@@ -1058,6 +1222,9 @@ export default function OnboardingScreen() {
             ]}
             onPress={() => {
               if (step < 7) {
+                // Start Khora's custom-profile build now, so the tailored
+                // questions on step 4 are usually ready before the user is.
+                if (step === 1) ensureCustomProfile();
                 animateToStep(step + 1);
               } else {
                 handleFinishOnboarding();
@@ -1338,6 +1505,38 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textSecondary,
     flex: 1,
     lineHeight: 16,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  tailoringCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LikhoraColors.aiBlueSoft,
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  tailoringText: {
+    flex: 1,
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    lineHeight: 18,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  tailoredBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LikhoraColors.aiBlueSoft,
+    borderRadius: Radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: Spacing.three,
+    alignSelf: 'flex-start',
+  },
+  tailoredBadgeText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
     fontFamily: LikhoraFont.fontFamily,
   },
   contingencyCard: {

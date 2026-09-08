@@ -44,3 +44,11 @@ example
 # generated native folders
 /ios
 /android
+
+# Firebase service account keys — full admin access to the project.
+# These belong in Supabase secrets, never in the repo.
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+
+# Supabase CLI local state (linked project ref, cached version).
+supabase/.temp/

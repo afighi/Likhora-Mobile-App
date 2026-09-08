@@ -147,62 +147,213 @@ export const searchTextPlaces = async (
   }
 };
 
-// Maps a Likhora supplier category chip to how it should be searched.
-// Queries are phrased to target human-food/retail suppliers specifically —
-// generic phrasing like "meat wholesale supplier" fuzzy-matches livestock
-// feed/agrivet stores in Google's text search, which are never relevant to
-// any of Likhora's supported MSME business types.
-export const CATEGORY_SEARCH_MAP: Record<string, { types?: string[]; textQuery?: string }> = {
+// Maps a supplier category chip to how it should be searched. Queries are
+// phrased for the specific trade rather than generic "wholesale", which
+// fuzzy-matches whatever large store happens to be nearby.
+export interface SupplierSearchConfig {
+  types?: string[];
+  textQuery?: string;
+}
+
+export const CATEGORY_SEARCH_MAP: Record<string, SupplierSearchConfig> = {
+  // --- general ---
   'Malls & Supermarkets': { types: ['shopping_mall', 'supermarket', 'department_store'] },
+  Packaging: { textQuery: 'packaging and container supplier' },
+  Equipment: { textQuery: 'business equipment supplier' },
+
+  // --- food trades ---
   'Rice & Grains': { textQuery: 'bigasan rice retailer wholesale for restaurants' },
   Meat: { textQuery: 'fresh meat and poultry supplier for restaurants' },
-  Packaging: { textQuery: 'food packaging and takeout container supplier' },
   Ingredients: { textQuery: 'food ingredients and condiments wholesale supplier' },
-  Equipment: { textQuery: 'kitchen and business equipment supplier' },
+  'Food Packaging': { textQuery: 'food packaging and takeout container supplier' },
+  'Kitchen Equipment': { textQuery: 'commercial kitchen equipment supplier' },
+
+  // --- service trades: these are the categories the old, food-only map had
+  //     no way to express, which is why a pet groomer saw only groceries ---
+  'Pet Supplies': { textQuery: 'pet grooming supplies and pet products distributor' },
+  'Salon & Beauty': { textQuery: 'salon and beauty supplies distributor' },
+  'Laundry Supplies': { textQuery: 'laundry detergent and supplies wholesale' },
+  'Cleaning Supplies': { textQuery: 'janitorial and cleaning supplies supplier' },
+  'Tools & Hardware': { textQuery: 'hardware and tools store' },
+  'Printing & Signage': { textQuery: 'printing and signage services supplier' },
+
+  // --- goods trades ---
+  'Fabric & Sewing': { textQuery: 'fabric and sewing supplies store' },
+  'Clothing Wholesale': { textQuery: 'ukay bale and RTW clothing wholesaler' },
+  Electronics: { textQuery: 'electronics and gadget parts supplier' },
+
+  // --- browse views ---
   Nearby: { types: ['supermarket', 'grocery_store', 'convenience_store', 'shopping_mall'] },
   All: { types: ['supermarket', 'grocery_store', 'shopping_mall'] },
 };
 
-// Shop/business-type keywords that never fit any of Likhora's supported
-// MSME categories (food stalls, sari-sari stores, online shops, services,
-// clothing, delivery) — filtered out everywhere, regardless of which
-// category chip is active or which data source found the listing.
+// Business types that never fit ANY Likhora user. Anything domain-specific
+// (pet shops, hardware, agrivet) belongs in a profile's allowedKeywords
+// instead — a pet shop is noise to a carinderia and essential to a groomer,
+// so it cannot be a global rule.
 const UNIVERSALLY_IRRELEVANT_KEYWORDS = [
-  'poultry supply', 'poultry and feeds', 'feeds supply', 'feed store', 'livestock',
-  'veterinary', 'agrivet', 'agricultural supply', 'fertilizer', 'pesticide', 'farm supply',
-  'pet shop', 'pet store', 'construction supply', 'hardware', 'auto parts', 'funeral', 'mortuary',
+  'funeral', 'mortuary', 'crematorium', 'cemetery',
+  'casino', 'pawnshop', 'lending', 'money changer',
 ];
 
-export const isSupplierRelevant = (name: string): boolean => {
-  const lower = name.toLowerCase();
-  return !UNIVERSALLY_IRRELEVANT_KEYWORDS.some((kw) => lower.includes(kw));
-};
+// Blocked for most businesses, but unblocked by a profile that needs them.
+const DOMAIN_KEYWORDS = [
+  'poultry supply', 'poultry and feeds', 'feeds supply', 'feed store', 'livestock',
+  'veterinary', 'agrivet', 'agricultural supply', 'fertilizer', 'pesticide', 'farm supply',
+  'pet shop', 'pet store', 'pet supply', 'grooming',
+  'construction supply', 'hardware', 'auto parts', 'motor parts',
+  'salon supply', 'beauty supply', 'laundry',
+];
 
-// Which chip-categories to search by default (the "All"/"Nearby" browse
-// view) for a given onboarding business type — so a Carinderia's default
-// results lead with food/ingredient suppliers, not whatever generic
-// "wholesale" happens to be nearby.
 export interface SupplierProfile {
+  /** Chip labels, in the order they should appear. */
   categories: string[];
+  /** Category -> how to search for it. Custom businesses get generated entries. */
+  searchMap: Record<string, SupplierSearchConfig>;
+  /** Free-text used by the Nominatim fallback when browsing with no query. */
+  browseKeyword: string;
+  /** Domain keywords this business legitimately needs, despite the blocklist. */
+  allowedKeywords: string[];
+  /** One-line guidance shown above the results. */
+  tip: string;
 }
 
-const FOOD_BUSINESS_PROFILE: SupplierProfile = {
-  categories: ['Rice & Grains', 'Meat', 'Ingredients', 'Packaging', 'Malls & Supermarkets'],
-};
+const buildProfile = (
+  categories: string[],
+  browseKeyword: string,
+  allowedKeywords: string[],
+  tip: string
+): SupplierProfile => ({
+  categories,
+  searchMap: CATEGORY_SEARCH_MAP,
+  browseKeyword,
+  allowedKeywords,
+  tip,
+});
+
+const FOOD_PROFILE = buildProfile(
+  ['Rice & Grains', 'Meat', 'Ingredients', 'Food Packaging', 'Kitchen Equipment', 'Malls & Supermarkets'],
+  'palengke wet market wholesale grocery supplier',
+  [],
+  'For your food business, start with the wet market and bagsakan suppliers. Compare fresh ingredient prices before committing to one.'
+);
 
 const BUSINESS_SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
-  Carinderia: FOOD_BUSINESS_PROFILE,
-  'Food Stall': FOOD_BUSINESS_PROFILE,
-  'Sari-sari Store': { categories: ['Malls & Supermarkets', 'Ingredients', 'Packaging'] },
-  'Online Shop': { categories: ['Packaging', 'Equipment', 'Malls & Supermarkets'] },
-  Services: { categories: ['Equipment', 'Packaging', 'Malls & Supermarkets'] },
-  'Clothing & RTW': { categories: ['Packaging', 'Equipment', 'Malls & Supermarkets'] },
-  'Delivery / Rides': { categories: ['Equipment', 'Malls & Supermarkets'] },
+  'Carinderia / Food Stall': FOOD_PROFILE,
+
+  'Sari-sari Store': buildProfile(
+    ['Malls & Supermarkets', 'Ingredients', 'Rice & Grains', 'Packaging'],
+    'wholesale grocery distributor supermarket',
+    [],
+    'For your store, prioritise wholesalers with consistent stock and transparent pakyawan pricing.'
+  ),
+
+  'Online Selling': buildProfile(
+    ['Packaging', 'Electronics', 'Clothing Wholesale', 'Malls & Supermarkets'],
+    'wholesale supplier packaging courier',
+    [],
+    'For online selling, packaging and a reliable stock source matter more than proximity — compare shipping terms too.'
+  ),
+
+  // The case the old map could not express at all.
+  'Serbisyo / Services': buildProfile(
+    ['Pet Supplies', 'Salon & Beauty', 'Laundry Supplies', 'Cleaning Supplies', 'Tools & Hardware', 'Equipment'],
+    'supplies and equipment supplier for service business',
+    [
+      'pet shop', 'pet store', 'pet supply', 'grooming', 'veterinary',
+      'salon supply', 'beauty supply', 'laundry',
+      'hardware', 'construction supply', 'auto parts', 'motor parts',
+    ],
+    'For a service business, look for consumables and equipment suppliers — the things you use up per job, and the tools you work with.'
+  ),
+
+  // Offline fallback only — when Khora is reachable, the "what do you mainly
+  // buy and sell" answer drives a search aimed at that specific trade.
+  'Buy & Sell / Reselling': buildProfile(
+    ['Clothing Wholesale', 'Electronics', 'Tools & Hardware', 'Packaging', 'Malls & Supermarkets'],
+    'wholesale supplier secondhand and surplus dealer',
+    ['auto parts', 'motor parts', 'hardware'],
+    'For buy and sell, build relationships with 2-3 sources so you are never captive to one price — and verify ownership papers on anything that has them.'
+  ),
 };
 
-const DEFAULT_SUPPLIER_PROFILE: SupplierProfile = {
-  categories: ['Malls & Supermarkets', 'Ingredients', 'Packaging', 'Equipment'],
+// business_type values stored before the five-profile rework.
+const LEGACY_SUPPLIER_ALIASES: Record<string, string> = {
+  Carinderia: 'Carinderia / Food Stall',
+  'Food Stall': 'Carinderia / Food Stall',
+  'Online Shop': 'Online Selling',
+  Services: 'Serbisyo / Services',
+  'Clothing & RTW': 'Buy & Sell / Reselling',
+  'Buy & Sell / RTW': 'Buy & Sell / Reselling',
+  'Delivery / Rides': 'Serbisyo / Services',
 };
 
-export const getSupplierProfileForBusiness = (businessType?: string): SupplierProfile =>
-  (businessType && BUSINESS_SUPPLIER_PROFILES[businessType]) || DEFAULT_SUPPLIER_PROFILE;
+const GENERIC_PROFILE = buildProfile(
+  ['Malls & Supermarkets', 'Equipment', 'Packaging'],
+  'wholesale supplier',
+  [],
+  'Start with the closest verified supplier, then compare their current price range before choosing.'
+);
+
+/**
+ * Builds a profile for a business type we have no hand-written entry for —
+ * a custom one the user typed, like "pet grooming" or "bike repair".
+ *
+ * The business type is used verbatim in the search phrase, so the results are
+ * about THAT trade rather than whatever generic wholesaler is nearby. Its own
+ * words also unblock the domain keywords it needs: "pet grooming" contains
+ * "pet", so pet shops stop being filtered out as noise.
+ */
+const buildCustomProfile = (businessType: string): SupplierProfile => {
+  const trade = businessType.trim();
+
+  const suppliesLabel = 'Supplies';
+  const equipmentLabel = 'Equipment';
+
+  return {
+    categories: [suppliesLabel, equipmentLabel, 'Packaging', 'Malls & Supermarkets'],
+    searchMap: {
+      ...CATEGORY_SEARCH_MAP,
+      [suppliesLabel]: { textQuery: `${trade} supplies wholesale supplier` },
+      [equipmentLabel]: { textQuery: `${trade} equipment and tools supplier` },
+    },
+    browseKeyword: `${trade} supplies supplier`,
+    // No domain filtering for a custom trade. The blocklist exists to clean up
+    // broad, grocery-shaped queries; here the query is already specific to the
+    // trade, so precision comes from the search phrase. Keyword filtering at
+    // this point removes the very shops the trade needs and cannot know it —
+    // "auto parts" reads as noise unless you happen to be a car wash, and a
+    // word-overlap rule does not catch it because "car" is not "auto".
+    allowedKeywords: DOMAIN_KEYWORDS,
+    tip: `For your ${trade} business, look for suppliers of the materials you use up per job, plus the equipment you work with.`,
+  };
+};
+
+export const getSupplierProfileForBusiness = (businessType?: string): SupplierProfile => {
+  if (!businessType?.trim()) return GENERIC_PROFILE;
+
+  const direct = BUSINESS_SUPPLIER_PROFILES[businessType];
+  if (direct) return direct;
+
+  const aliased = LEGACY_SUPPLIER_ALIASES[businessType];
+  if (aliased && BUSINESS_SUPPLIER_PROFILES[aliased]) return BUSINESS_SUPPLIER_PROFILES[aliased];
+
+  return buildCustomProfile(businessType);
+};
+
+/**
+ * Whether a listing is worth showing this particular business. The blocklist
+ * is deliberately business-aware: filtering "pet shop" globally is what made
+ * a pet groomer's supplier list useless.
+ */
+export const isSupplierRelevant = (name: string, avoid: string[] = []): boolean => {
+  const lower = name.toLowerCase();
+
+  // Only universally-junk listings are filtered here. Anything domain-specific
+  // is decided per business by Khora (services/supplierAdvisor.ts) and arrives
+  // in `avoid` — a keyword blocklist in this file cannot know whether "auto
+  // parts" is noise or the whole point.
+  if (UNIVERSALLY_IRRELEVANT_KEYWORDS.some((keyword) => lower.includes(keyword))) return false;
+
+  return !avoid.some((keyword) => keyword && lower.includes(keyword));
+};

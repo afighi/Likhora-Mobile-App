@@ -10,6 +10,8 @@ import {
   Modal,
   ActivityIndicator
 } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -20,8 +22,9 @@ import {
   HelpCircle,
   LogOut,
   ChevronRight,
-  Palette,
+  Camera,
   Check,
+  Trash2,
   MapPin,
   RotateCcw,
   Sparkles,
@@ -32,18 +35,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { syncUserProfile, fetchUserRoadmap } from '@/services/supabase';
+import { syncUserProfile, fetchUserRoadmap, uploadAvatarImage } from '@/services/supabase';
 import { resetPasswordFirebase } from '@/services/firebase';
 import { Button } from '@/components/ui/Button';
+import { BUSINESS_PROFILES } from '@/services/businessProfiles';
 
-const AVATAR_COLORS = [
-  '#7C3AED', // Primary Purple
-  '#2563EB', // Royal Blue
-  '#059669', // Emerald Green
-  '#D97706', // Amber Gold
-  '#DC2626', // Crimson Red
-  '#DB2777', // Pink
-];
+// Background for the initials shown when a user has no photo. Kept as a
+// stored value so existing accounts keep the colour they were given; it is no
+// longer something the user picks.
+const DEFAULT_AVATAR_COLOR = '#7C3AED';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -64,7 +64,9 @@ export default function ProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   // Custom Modals States
-  const [selectedAvatarColor, setSelectedAvatarColor] = useState(userProfile?.avatar_color || '#7C3AED');
+  const [avatarColor, setAvatarColor] = useState(userProfile?.avatar_color || DEFAULT_AVATAR_COLOR);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(userProfile?.avatar_url || null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [retakeModalVisible, setRetakeModalVisible] = useState(false);
@@ -72,9 +74,15 @@ export default function ProfileScreen() {
   const [resetMessage, setResetMessage] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
-  // Roadmap Progress Stats State
-  const [totalTasksCount, setTotalTasksCount] = useState(6);
+  // Roadmap Progress Stats State. Starts at 0, not a guessed 6 — a user with
+  // no roadmap yet was being shown "0 of 6 milestones" against a total that
+  // did not exist.
+  const [totalTasksCount, setTotalTasksCount] = useState(0);
   const [completedTasksCount, setCompletedTasksCount] = useState(0);
+
+  // Lets the user pick a business type that the rest of the app recognises,
+  // while still allowing anything they type themselves.
+  const [customTypeOpen, setCustomTypeOpen] = useState(false);
 
   // Sync profile fields when userProfile updates
   useEffect(() => {
@@ -84,7 +92,8 @@ export default function ProfileScreen() {
       setBusinessType(userProfile.business_type || '');
       setLocation(userProfile.location || '');
       setBudget(userProfile.budget || '');
-      setSelectedAvatarColor(userProfile.avatar_color || '#7C3AED');
+      setAvatarColor(userProfile.avatar_color || DEFAULT_AVATAR_COLOR);
+      setAvatarUrl(userProfile.avatar_url || null);
       setPushNotifs(userProfile.push_notifications_enabled ?? true);
       setEmailNotifs(userProfile.email_notifications_enabled ?? true);
     }
@@ -116,6 +125,7 @@ export default function ProfileScreen() {
   // time this screen mounts.
   const persistPreference = async (patch: Partial<{
     avatar_color: string;
+    avatar_url: string | null;
     push_notifications_enabled: boolean;
     email_notifications_enabled: boolean;
   }>) => {
@@ -129,7 +139,63 @@ export default function ProfileScreen() {
       ...patch,
     };
     setUserProfile(updatedProfile);
-    await syncUserProfile(updatedProfile);
+
+    // syncUserProfile resolves with { error } rather than throwing, so an
+    // unchecked await here silently reported success on a failed write.
+    const { error } = await syncUserProfile(updatedProfile);
+    if (error) {
+      console.warn('Preference sync failed:', error);
+      showToast('Saved on this device only — could not reach the server.');
+    }
+  };
+
+  const handlePickAvatar = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      showToast('Allow photo access to set a profile picture.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      // Avatars render at 32-96px, so a small file keeps uploads fast and
+      // community feeds light.
+      quality: 0.5,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+
+    const asset = result.assets[0];
+    const uid = userProfile?.id || user?.uid;
+    if (!uid) return;
+
+    setAvatarModalVisible(false);
+    setUploadingAvatar(true);
+    try {
+      const ext = asset.uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+      const { url, error } = await uploadAvatarImage(uid, asset.base64 as string, ext);
+      if (error || !url) {
+        showToast('Could not upload your photo. Please try again.');
+        return;
+      }
+      setAvatarUrl(url);
+      await persistPreference({ avatar_url: url });
+      showToast('Profile photo updated!');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarModalVisible(false);
+    setAvatarUrl(null);
+    // The stored file is left in place: an older community post may still be
+    // pointing at it, and orphaning one small image beats breaking a post.
+    await persistPreference({ avatar_url: null });
+    showToast('Profile photo removed.');
   };
 
   const handleSaveProfile = async () => {
@@ -148,13 +214,21 @@ export default function ProfileScreen() {
     };
 
     try {
-      await syncUserProfile(updatedProfile);
+      // Same trap as above: this never rejects, so the old catch block never
+      // ran and every save — including a failed one — claimed success.
+      const { error } = await syncUserProfile(updatedProfile);
       setUserProfile(updatedProfile);
       setIsEditing(false);
-      showToast('Profile details updated successfully!');
+
+      if (error) {
+        console.warn('Profile save failed:', error);
+        showToast('Saved on this device only — could not reach the server.');
+      } else {
+        showToast('Profile details updated successfully!');
+      }
     } catch (err: any) {
       console.warn('Save error:', err);
-      showToast('Profile updated locally.');
+      showToast('Saved on this device only — could not reach the server.');
     } finally {
       setSaving(false);
     }
@@ -206,6 +280,10 @@ export default function ProfileScreen() {
     ? (userProfile?.full_name || fullName).split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() 
     : 'LK';
 
+  // Derived rather than stored, so no effect has to sync them with the profile.
+  const isPresetType = BUSINESS_PROFILES.some((profile) => profile.id === businessType);
+  const showCustomType = customTypeOpen || (!isPresetType && businessType.trim().length > 0);
+
   const roadmapProgressPct = Math.round((completedTasksCount / (totalTasksCount || 1)) * 100);
 
   return (
@@ -249,33 +327,49 @@ export default function ProfileScreen() {
           {/* Profile Header Card */}
           <View style={styles.profileHeaderCard}>
             <View style={styles.avatarWrapper}>
-              <View style={[styles.avatarCircle, { backgroundColor: selectedAvatarColor }]}>
-                <Text style={styles.avatarText}>{userInitials}</Text>
-              </View>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatarCircle} contentFit="cover" transition={150} />
+              ) : (
+                <View style={[styles.avatarCircle, { backgroundColor: avatarColor }]}>
+                  <Text style={styles.avatarText}>{userInitials}</Text>
+                </View>
+              )}
+
+              {uploadingAvatar && (
+                <View style={[styles.avatarCircle, styles.avatarUploading]}>
+                  <ActivityIndicator color="#FFFFFF" />
+                </View>
+              )}
               <TouchableOpacity 
                 style={styles.cameraBadge} 
                 onPress={() => setAvatarModalVisible(true)}
                 activeOpacity={0.8}
               >
-                <Palette size={12} color="#FFFFFF" />
+                <Camera size={12} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
 
             <Text style={styles.userName}>{userProfile?.full_name || fullName || 'Entrepreneur'}</Text>
-            <Text style={styles.userEmail}>{userProfile?.email || user?.email || 'user@negosyo.ph'}</Text>
+            <Text style={styles.userEmail}>
+              {userProfile?.email || user?.email || 'No email on file'}
+            </Text>
 
             <View style={styles.badgeRow}>
               {userProfile?.business_name || businessName ? (
                 <View style={styles.businessBadge}>
                   <Store size={12} color={LikhoraColors.primary} style={{ marginRight: 4 }} />
-                  <Text style={styles.businessBadgeText}>{userProfile?.business_name || businessName}</Text>
+                  <Text style={styles.businessBadgeText} numberOfLines={1} ellipsizeMode="tail">
+                    {userProfile?.business_name || businessName}
+                  </Text>
                 </View>
               ) : null}
 
               {userProfile?.location || location ? (
                 <View style={styles.businessBadge}>
                   <MapPin size={12} color={LikhoraColors.primary} style={{ marginRight: 4 }} />
-                  <Text style={styles.businessBadgeText}>{userProfile?.location || location}</Text>
+                  <Text style={styles.businessBadgeText} numberOfLines={1} ellipsizeMode="tail">
+                    {userProfile?.location || location}
+                  </Text>
                 </View>
               ) : null}
             </View>
@@ -303,12 +397,53 @@ export default function ProfileScreen() {
               />
 
               <Text style={styles.inputLabel}>Business Category / Industry</Text>
-              <TextInput
-                style={styles.inputField}
-                value={businessType}
-                onChangeText={setBusinessType}
-                placeholder="e.g. Retail, Food Service"
-              />
+              {/* Typing this freehand used to break things quietly: the
+                  roadmap, calculator markups and supplier targeting all key
+                  off business_type, so "Retail, Food Service" matched no
+                  profile and silently fell back to generic behaviour. */}
+              <View style={styles.typeChipRow}>
+                {BUSINESS_PROFILES.map((profile) => {
+                  const selected = !showCustomType && businessType === profile.id;
+                  return (
+                    <TouchableOpacity
+                      key={profile.id}
+                      style={[styles.typeChip, selected && styles.typeChipSelected]}
+                      onPress={() => {
+                        setCustomTypeOpen(false);
+                        setBusinessType(profile.id);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.typeChipText, selected && styles.typeChipTextSelected]}>
+                        {profile.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <TouchableOpacity
+                  style={[styles.typeChip, showCustomType && styles.typeChipSelected]}
+                  onPress={() => {
+                    setCustomTypeOpen(true);
+                    if (isPresetType) setBusinessType('');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.typeChipText, showCustomType && styles.typeChipTextSelected]}>
+                    Something else
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {showCustomType && (
+                <TextInput
+                  style={styles.inputField}
+                  value={businessType}
+                  onChangeText={setBusinessType}
+                  placeholder="e.g. pet grooming, car wash, print shop"
+                  autoCapitalize="none"
+                />
+              )}
 
               <Text style={styles.inputLabel}>City / Province Location</Text>
               <TextInput
@@ -338,18 +473,23 @@ export default function ProfileScreen() {
           {/* Profile Overview Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Status</Text>
+              <Text style={styles.statLabel}>Setup</Text>
               <View style={styles.statusBadge}>
-                <Check size={10} color={LikhoraColors.successGreen} style={{ marginRight: 4 }} />
+                {userProfile?.onboarded ? (
+                  <Check size={10} color={LikhoraColors.successGreen} style={{ marginRight: 4 }} />
+                ) : null}
                 <Text style={styles.statusText}>
-                  {userProfile?.onboarded ? 'Onboarded' : 'Active'}
+                  {userProfile?.onboarded ? 'Complete' : 'Not finished'}
                 </Text>
               </View>
             </View>
 
+            {/* Was a hardcoded "Entrepreneur" that told the user nothing. */}
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Account Type</Text>
-              <Text style={styles.statValue}>Entrepreneur</Text>
+              <Text style={styles.statLabel}>Business Type</Text>
+              <Text style={styles.statValue} numberOfLines={1}>
+                {userProfile?.business_type || businessType || 'Not set'}
+              </Text>
             </View>
           </View>
 
@@ -373,7 +513,9 @@ export default function ProfileScreen() {
 
             <View style={styles.roadmapSubRow}>
               <Text style={styles.roadmapSubText}>
-                {completedTasksCount} of {totalTasksCount} milestones completed
+                {totalTasksCount > 0
+                  ? `${completedTasksCount} of ${totalTasksCount} milestones completed`
+                  : 'No roadmap yet — tap to build one'}
               </Text>
               <ChevronRight size={16} color={LikhoraColors.primary} />
             </View>
@@ -497,34 +639,35 @@ export default function ProfileScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Choose Avatar Style</Text>
+              <Text style={styles.modalTitle}>Profile Photo</Text>
               <TouchableOpacity onPress={() => setAvatarModalVisible(false)}>
                 <X size={20} color={LikhoraColors.textPrimary} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalSubtitle}>Select a color theme for your profile badge:</Text>
-            
-            <View style={styles.colorRow}>
-              {AVATAR_COLORS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[
-                    styles.colorPill,
-                    { backgroundColor: c },
-                    selectedAvatarColor === c && styles.colorPillActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedAvatarColor(c);
-                    setAvatarModalVisible(false);
-                    void persistPreference({ avatar_color: c });
-                    showToast('Avatar theme updated!');
-                  }}
-                >
-                  {selectedAvatarColor === c && <Check size={16} color="#FFFFFF" strokeWidth={3} />}
-                </TouchableOpacity>
-              ))}
-            </View>
+            <Text style={styles.modalSubtitle}>
+              Your photo appears on the roadmaps you share in Likha Community.
+            </Text>
+
+            <TouchableOpacity style={styles.photoAction} onPress={handlePickAvatar} activeOpacity={0.8}>
+              <View style={[styles.photoActionIcon, { backgroundColor: LikhoraColors.primarySoft }]}>
+                <Camera size={17} color={LikhoraColors.primary} />
+              </View>
+              <Text style={styles.photoActionText}>
+                {avatarUrl ? 'Choose a different photo' : 'Choose a photo'}
+              </Text>
+            </TouchableOpacity>
+
+            {avatarUrl ? (
+              <TouchableOpacity style={styles.photoAction} onPress={handleRemoveAvatar} activeOpacity={0.8}>
+                <View style={[styles.photoActionIcon, { backgroundColor: '#FEF2F2' }]}>
+                  <Trash2 size={17} color={LikhoraColors.errorRed} />
+                </View>
+                <Text style={[styles.photoActionText, { color: LikhoraColors.errorRed }]}>
+                  Remove photo
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -667,6 +810,58 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textPrimary,
     fontFamily: LikhoraFont.fontFamily,
   },
+  avatarUploading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    backgroundColor: 'rgba(20, 8, 22, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  photoActionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  photoActionText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  typeChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  typeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+    backgroundColor: '#FFFFFF',
+  },
+  typeChipSelected: {
+    backgroundColor: LikhoraColors.primarySoft,
+    borderColor: LikhoraColors.primary,
+  },
+  typeChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  typeChipTextSelected: { color: LikhoraColors.primary },
   editBtn: {
     padding: 6,
   },
@@ -766,12 +961,14 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     borderWidth: 1,
     borderColor: LikhoraColors.border,
+    maxWidth: 220,
   },
   businessBadgeText: {
     fontSize: 12,
     fontWeight: '700',
     color: LikhoraColors.primary,
     fontFamily: LikhoraFont.fontFamily,
+    flexShrink: 1,
   },
   editFormCard: {
     backgroundColor: LikhoraColors.secondaryLavender,
@@ -1071,27 +1268,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     fontFamily: LikhoraFont.fontFamily,
-  },
-  colorRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginVertical: 8,
-  },
-  colorPill: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  colorPillActive: {
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
   },
 });

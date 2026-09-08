@@ -46,11 +46,10 @@ import {
   isGooglePlacesConfigured,
   searchNearbyPlaces,
   searchTextPlaces,
-  CATEGORY_SEARCH_MAP,
   GooglePlaceResult,
   isSupplierRelevant,
-  getSupplierProfileForBusiness,
 } from '@/services/places';
+import { getAISupplierProfile, SupplierProfileResult } from '@/services/supplierAdvisor';
 
 // Google Places (New) priceLevel enum -> a compact ₱ symbol for the UI.
 const GOOGLE_PRICE_LEVEL_MAP: Record<string, string> = {
@@ -202,18 +201,56 @@ export default function SuppliersTab() {
   };
 
   const { displayLocation, queryCity, province } = getUserLocationDisplay();
-  const businessType = userProfile?.business_type?.toLowerCase() || '';
-  // Tailors which supplier categories the "All"/"Nearby" browse view leads
-  // with, based on the user's actual onboarding business type (e.g. a
-  // Carinderia leads with rice/meat/ingredient suppliers, not generic
-  // wholesale that could include anything from feed stores to hardware).
-  const supplierProfile = getSupplierProfileForBusiness(userProfile?.business_type);
-  const supplierRecommendation = businessType.includes('food') || businessType.includes('carinderia')
-    ? 'For your food business, start with marketplaces, groceries, and wholesale suppliers. Compare fresh ingredient prices before committing.'
-    : businessType.includes('retail') || businessType.includes('sari')
-      ? 'For your retail business, prioritize wholesalers and supermarkets with consistent stock and transparent prices.'
-      : 'Start with the closest verified marketplace or wholesale listing, then compare their current price range before choosing.';
-  const supplierCategories = ['All', 'Rice & Grains', 'Meat', 'Packaging', 'Nearby', 'Malls & Supermarkets', 'Ingredients', 'Equipment'];
+  // Which suppliers this business needs is decided by Khora from the user's
+  // actual business type, not from a lookup table — a table only knows the
+  // trades someone thought to add, and answers "supermarket" for every one it
+  // does not. Built-in profiles remain only as an offline fallback.
+  const [supplierProfile, setSupplierProfile] = useState<SupplierProfileResult | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+
+  // Read off the profile once so the memo/effect deps below are the exact
+  // values they use, not the whole userProfile object.
+  const businessTypeValue = userProfile?.business_type;
+  const businessNameValue = userProfile?.business_name;
+  const businessLocation = userProfile?.location;
+  const onboardingDraft = userProfile?.onboarding_draft;
+
+  const serviceDetail = useMemo(() => {
+    try {
+      const draft = onboardingDraft ? JSON.parse(onboardingDraft) : null;
+      // The answers from onboarding step 4 describe the trade far more
+      // precisely than a broad category like "Serbisyo / Services" can.
+      const answers: string[] = Object.values(draft?.extraAnswers || {});
+      return [businessNameValue, ...answers].filter(Boolean).join(', ') || null;
+    } catch {
+      return businessNameValue || null;
+    }
+  }, [onboardingDraft, businessNameValue]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProfile = async () => {
+      setProfileLoading(true);
+      const profile = await getAISupplierProfile(businessTypeValue, {
+        detail: serviceDetail,
+        location: businessLocation,
+      });
+      if (!cancelled) {
+        setSupplierProfile(profile);
+        setProfileLoading(false);
+      }
+    };
+
+    loadProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessTypeValue, serviceDetail, businessLocation]);
+  const supplierRecommendation =
+    supplierProfile?.tip || 'Finding the right suppliers for your business...';
+  // Chips are whatever Khora decided this trade buys from.
+  const supplierCategories = ['All', 'Nearby', ...(supplierProfile?.categories || []).map((c) => c.label)];
 
   // Resolve the user's coordinates according to locationMode:
   // - 'auto' (default): device GPS first, falling back to their saved
@@ -373,7 +410,7 @@ export default function SuppliersTab() {
       // Never show listings that don't fit any of Likhora's supported MSME
       // business types (feed stores, veterinary suppliers, hardware, etc.),
       // regardless of which source found them or which category is active.
-      if (!isSupplierRelevant(item.name)) return false;
+      if (!isSupplierRelevant(item.name, supplierProfile?.avoid || [])) return false;
 
       const matchCat = cat === 'All' || cat === 'Nearby' || item.category === cat;
       if (!matchCat) return false;
@@ -381,7 +418,7 @@ export default function SuppliersTab() {
       const nameMatch = item.name?.toLowerCase().includes(q);
       const locMatch = item.location?.toLowerCase().includes(q);
       const catMatch = item.category?.toLowerCase().includes(q);
-      const tagMatch = item.tags?.some(t => t.toLowerCase().includes(q));
+      const tagMatch = item.tags?.some((t) => typeof t === 'string' && t.toLowerCase().includes(q));
       const priceMatch = item.price_range?.toLowerCase().includes(q);
       return nameMatch || locMatch || catMatch || tagMatch || priceMatch;
     });
@@ -401,7 +438,7 @@ export default function SuppliersTab() {
     distance: `${getDistanceFromLatLonInKm(fromLat, fromLng, place.lat, place.lng).toFixed(1)} km`,
     location: place.address || `${displayLocation}, Philippines`,
     tags: [
-      category,
+      String(category),
       place.userRatingCount ? `${place.userRatingCount} Google reviews` : 'Google Places listing',
     ],
     price_level: place.priceLevel ? GOOGLE_PRICE_LEVEL_MAP[place.priceLevel] || '' : '',
@@ -439,20 +476,22 @@ export default function SuppliersTab() {
       const places = await searchTextPlaces(`${query.trim()} supplier`, lat, lng);
       results = places.map((p) => mapGooglePlaceToSupplier(p, categorizeByGoogleTypes(p.types), lat, lng));
     } else {
-      const targets = category !== 'All' && category !== 'Nearby'
-        ? [category]
-        : supplierProfile.categories;
+      const allCategories = supplierProfile?.categories || [];
+      const targets =
+        category !== 'All' && category !== 'Nearby'
+          ? allCategories.filter((c) => c.label === category)
+          : allCategories;
 
       const grouped = await Promise.all(
         targets.map(async (cat) => {
-          const config = CATEGORY_SEARCH_MAP[cat];
-          if (!config) return [] as SupplierItem[];
+          const config = cat.types ? { types: cat.types } : { textQuery: cat.search };
+          if (!config.types && !config.textQuery) return [] as SupplierItem[];
           const places = config.types
             ? await searchNearbyPlaces(lat, lng, config.types)
             : config.textQuery
               ? await searchTextPlaces(config.textQuery, lat, lng)
               : [];
-          return places.map((p) => mapGooglePlaceToSupplier(p, cat, lat, lng));
+          return places.map((p) => mapGooglePlaceToSupplier(p, cat.label, lat, lng));
         })
       );
       results = grouped.flat();
@@ -519,8 +558,10 @@ export default function SuppliersTab() {
 
       // 4. Fallback Query OpenStreetMap Nominatim Places API
       const keyword = searchQuery.trim()
-        ? searchQuery.trim() 
-        : `${activeCategory !== 'All' ? activeCategory : 'supermarket mall grocery wholesale market'}`;
+        ? searchQuery.trim()
+        : activeCategory !== 'All' && activeCategory !== 'Nearby'
+          ? supplierProfile?.categories.find((c) => c.label === activeCategory)?.search || activeCategory
+          : supplierProfile?.browseSearch || 'wholesale supplier';
 
       const apiRes = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword)}+in+${encodeURIComponent(queryCity)}&limit=25`,
@@ -569,8 +610,10 @@ export default function SuppliersTab() {
   };
 
   useEffect(() => {
-    if (userCoords) loadSuppliersLive();
-  }, [activeCategory, searchQuery, queryCity, displayLocation, userCoords]);
+    // Waiting on the profile matters: fetching before it lands would search
+    // with no categories and show a generic list that then swaps underneath.
+    if (userCoords && supplierProfile) loadSuppliersLive();
+  }, [activeCategory, searchQuery, queryCity, displayLocation, userCoords, supplierProfile]);
 
   // Refinement filters applied on top of the already-fetched results — no
   // re-fetch needed, so these feel instant.
@@ -796,7 +839,13 @@ export default function SuppliersTab() {
 
           <View style={styles.recommendationCard}>
             <Sparkles size={17} color={LikhoraColors.primary} style={{ marginRight: 8 }} />
-            <View style={{ flex: 1 }}><Text style={styles.recommendationTitle}>Recommended next supplier</Text><Text style={styles.recommendationText}>{supplierRecommendation}</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.recommendationTitle}>
+                {profileLoading ? 'Tailoring your suppliers' : 'Recommended next supplier'}
+              </Text>
+              <Text style={styles.recommendationText}>{supplierRecommendation}</Text>
+            </View>
+            {profileLoading && <ActivityIndicator size="small" color={LikhoraColors.primary} />}
           </View>
 
           {/* 4. FILTER CHIPS HORIZONTAL SCROLL */}
@@ -946,7 +995,16 @@ export default function SuppliersTab() {
           ) : (
             filteredSuppliersList.map((item) => {
               const isAdded = addedPlans.includes(item.id);
-              const isMall = item.category === 'Malls & Supermarkets' || item.tags.some(t => t.toLowerCase().includes('mall') || t.toLowerCase().includes('supermarket'));
+              // Tags arrive from Google Places, Supabase and OpenStreetMap, so
+              // guard the shape rather than trusting every source to hand back
+              // an array of strings — one bad value here blanks the whole tab.
+              const isMall =
+                item.category === 'Malls & Supermarkets' ||
+                (item.tags || []).some(
+                  (t) =>
+                    typeof t === 'string' &&
+                    (t.toLowerCase().includes('mall') || t.toLowerCase().includes('supermarket'))
+                );
 
               return (
                 <View key={item.id} style={styles.supplierCard}>

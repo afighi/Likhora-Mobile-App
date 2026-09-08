@@ -20,7 +20,8 @@ import {
   Flame,
   CalendarDays,
   Target,
-  ChevronRight
+  ChevronRight,
+  Calculator
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -172,7 +173,16 @@ export default function DashboardHomeScreen() {
               activeOpacity={0.8}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <Text style={styles.avatarInitialsText}>{userInitials}</Text>
+              {userProfile?.avatar_url ? (
+                <Image
+                  source={{ uri: userProfile.avatar_url }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                  transition={150}
+                />
+              ) : (
+                <Text style={styles.avatarInitialsText}>{userInitials}</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -314,6 +324,18 @@ export default function DashboardHomeScreen() {
 
           <TouchableOpacity
             style={styles.gridCard}
+            onPress={() => router.push('/calculator')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.gridCardIconBg, { backgroundColor: LikhoraColors.highlightYellowSoft }]}>
+              <Calculator size={18} color={LikhoraColors.highlightYellow} />
+            </View>
+            <Text style={styles.gridCardTitle}>Smart Calculator</Text>
+            <Text style={styles.gridCardSub}>Khora sets the price, tubo and ROI</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.gridCard}
             onPress={() => router.push('/suppliers')}
             activeOpacity={0.8}
           >
@@ -442,12 +464,15 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
+    overflow: 'hidden',
     backgroundColor: LikhoraColors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: LikhoraColors.softPurple,
   },
+  // Fills the circular button, clipped by its border radius.
+  avatarImage: { width: '100%', height: '100%', borderRadius: 19 },
   avatarInitialsText: {
     color: '#FFFFFF',
     fontSize: 13,

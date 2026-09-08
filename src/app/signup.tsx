@@ -20,8 +20,9 @@ import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { AppLogo } from '@/components/ui/AppLogo';
 import { LikhoraColors, Radius, Spacing } from '@/constants/theme';
 import { getGoogleSignInErrorMessage, signUpWithFirebase, loginWithGoogleFirebase } from '@/services/firebase';
-import { syncUserProfile } from '@/services/supabase';
+import { fetchUserProfile, syncUserProfile } from '@/services/supabase';
 import { sendOTPEmail, generateOTPCode } from '@/services/emailjs';
+import { OtpInput } from '@/components/ui/OtpInput';
 import { useAuth } from '@/context/AuthContext';
 
 export default function SignupScreen() {
@@ -32,7 +33,9 @@ export default function SignupScreen() {
   const [step, setStep] = useState(1);
 
   // Form State (Standard Sign Up: Full Name, Email Address)
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -84,6 +87,12 @@ export default function SignupScreen() {
     criteriaPassed <= 2 ? 'Weak password' : 
     criteriaPassed <= 4 ? 'Medium password' : 'Strong password';
 
+  // The parts are collected separately but stored as one name — profiles,
+  // community posts and the greeting all read a single full_name.
+  const displayName = [firstName.trim(), middleName.trim(), lastName.trim()]
+    .filter(Boolean)
+    .join(' ');
+
   // Timer effect for OTP resend
   useEffect(() => {
     let interval: any;
@@ -103,8 +112,11 @@ export default function SignupScreen() {
     const errs: { [key: string]: string } = {};
     let hasErr = false;
 
-    if (!fullName.trim()) {
-      errs.fullName = 'Please enter your full name';
+    if (!firstName.trim()) {
+      errs.firstName = 'Please enter your first name';
+    }
+    if (!lastName.trim()) {
+      errs.lastName = 'Please enter your last name';
       hasErr = true;
     }
     if (!email.trim() || !email.includes('@')) {
@@ -147,7 +159,7 @@ export default function SignupScreen() {
     const otp = generateOTPCode();
     setGeneratedOTP(otp);
 
-    const emailResult = await sendOTPEmail(email.trim(), otp, fullName.trim());
+    const emailResult = await sendOTPEmail(email.trim(), otp, firstName.trim());
     setLoading(false);
 
     if (emailResult.success) {
@@ -166,11 +178,16 @@ export default function SignupScreen() {
     const otp = generateOTPCode();
     setGeneratedOTP(otp);
 
-    await sendOTPEmail(email.trim(), otp, fullName.trim());
+    const emailResult = await sendOTPEmail(email.trim(), otp, firstName.trim());
     setLoading(false);
-    setResendTimer(60);
-    setCanResend(false);
-    Alert.alert('Code Sent', `A new 6-digit OTP code has been sent to ${email}`);
+
+    if (emailResult.success) {
+      setResendTimer(60);
+      setCanResend(false);
+      Alert.alert('Code Sent', `A new 6-digit OTP code has been sent to ${email}`);
+    } else {
+      setErrorMsg('Failed to resend code. Please try again');
+    }
   };
 
   const handleVerifyAndRegister = async () => {
@@ -196,7 +213,7 @@ export default function SignupScreen() {
       const newProfile = {
         id: firebaseUser.uid,
         email: email.trim(),
-        full_name: fullName.trim(),
+        full_name: displayName,
         onboarded: false,
       };
 
@@ -277,15 +294,40 @@ export default function SignupScreen() {
                 </View>
 
                 <Input
-                  label="Full Name"
-                  placeholder="Juan Dela Cruz"
-                  value={fullName}
+                  label="First Name"
+                  placeholder="Juan"
+                  value={firstName}
                   onChangeText={(txt) => {
-                    setFullName(txt);
-                    if (fieldErrors.fullName) setFieldErrors({ ...fieldErrors, fullName: '' });
+                    setFirstName(txt);
+                    if (fieldErrors.firstName) setFieldErrors({ ...fieldErrors, firstName: '' });
                   }}
                   autoCapitalize="words"
-                  error={fieldErrors.fullName}
+                  textContentType="givenName"
+                  error={fieldErrors.firstName}
+                />
+
+                {/* Optional: plenty of Filipinos use a middle name, plenty
+                    leave it off — requiring it would block valid signups. */}
+                <Input
+                  label="Middle Name (optional)"
+                  placeholder="Santos"
+                  value={middleName}
+                  onChangeText={setMiddleName}
+                  autoCapitalize="words"
+                  textContentType="middleName"
+                />
+
+                <Input
+                  label="Last Name"
+                  placeholder="Dela Cruz"
+                  value={lastName}
+                  onChangeText={(txt) => {
+                    setLastName(txt);
+                    if (fieldErrors.lastName) setFieldErrors({ ...fieldErrors, lastName: '' });
+                  }}
+                  autoCapitalize="words"
+                  textContentType="familyName"
+                  error={fieldErrors.lastName}
                 />
 
                 <Input
@@ -329,20 +371,28 @@ export default function SignupScreen() {
                     try {
                       const userCred = await loginWithGoogleFirebase();
                       if (userCred.user) {
-                        await syncUserProfile({
-                          id: userCred.user.uid,
-                          email: userCred.user.email || '',
-                          full_name: userCred.user.displayName || 'Entrepreneur',
-                          onboarded: false,
-                        });
-                        setUserProfile({
-                          id: userCred.user.uid,
-                          email: userCred.user.email || '',
-                          full_name: userCred.user.displayName || 'Entrepreneur',
-                          onboarded: false,
-                        });
-                        setOnboardingCompleted(false);
-                        router.replace('/onboarding');
+                        // Google sign-in doesn't distinguish "sign up" from
+                        // "log in" — someone with an existing account can
+                        // land here and click this too. Check for a
+                        // profile first so a returning user keeps their
+                        // real onboarding state instead of it being reset.
+                        const { data: existingProfile } = await fetchUserProfile(userCred.user.uid);
+                        if (existingProfile) {
+                          setUserProfile(existingProfile);
+                          setOnboardingCompleted(existingProfile.onboarded ?? false);
+                          router.replace(existingProfile.onboarded ? '/(tabs)' : '/onboarding');
+                        } else {
+                          const newProfile = {
+                            id: userCred.user.uid,
+                            email: userCred.user.email || '',
+                            full_name: userCred.user.displayName || 'Entrepreneur',
+                            onboarded: false,
+                          };
+                          await syncUserProfile(newProfile);
+                          setUserProfile(newProfile);
+                          setOnboardingCompleted(false);
+                          router.replace('/onboarding');
+                        }
                       }
                     } catch (err: any) {
                       console.warn('Google sign up note:', err);
@@ -498,18 +548,13 @@ export default function SignupScreen() {
                   </Text>
                 </View>
 
-                <Input
-                  label="6-Digit OTP Code"
-                  placeholder="123456"
+                <OtpInput
                   value={userOTP}
-                  onChangeText={(txt) => {
-                    setUserOTP(txt);
+                  onChange={(code) => {
+                    setUserOTP(code);
                     if (fieldErrors.otp) setFieldErrors({ ...fieldErrors, otp: '' });
                   }}
-                  keyboardType="number-pad"
-                  maxLength={6}
                   error={fieldErrors.otp}
-                  style={{ textAlign: 'center', letterSpacing: 8, fontSize: 22, fontWeight: '700' }}
                 />
 
                 {/* Minimal Warning Pill */}

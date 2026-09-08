@@ -19,7 +19,7 @@ import { GoogleIcon } from '@/components/ui/GoogleIcon';
 import { AppLogo } from '@/components/ui/AppLogo';
 import { LikhoraColors, Radius, Spacing } from '@/constants/theme';
 import { getGoogleSignInErrorMessage, loginWithFirebase, loginWithGoogleFirebase } from '@/services/firebase';
-import { syncUserProfile } from '@/services/supabase';
+import { fetchUserProfile, syncUserProfile } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 
 export default function LoginScreen() {
@@ -80,12 +80,20 @@ export default function LoginScreen() {
     try {
       const userCred = await loginWithGoogleFirebase();
       if (userCred.user) {
-        await syncUserProfile({
-          id: userCred.user.uid,
-          email: userCred.user.email || '',
-          full_name: userCred.user.displayName || 'Entrepreneur',
-          onboarded: false,
-        });
+        // This is the Login screen: most people who click "Continue with
+        // Google" here already have an account. Only initialize a fresh
+        // profile (onboarded: false) when one genuinely doesn't exist yet —
+        // upserting onboarded: false unconditionally was resetting a real,
+        // already-onboarded user's progress on every Google login.
+        const { data: existingProfile } = await fetchUserProfile(userCred.user.uid);
+        if (!existingProfile) {
+          await syncUserProfile({
+            id: userCred.user.uid,
+            email: userCred.user.email || '',
+            full_name: userCred.user.displayName || 'Entrepreneur',
+            onboarded: false,
+          });
+        }
         await refreshProfile();
         router.replace('/(tabs)');
       }

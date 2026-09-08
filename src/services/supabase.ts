@@ -1,5 +1,8 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { auth as firebaseAuth } from './firebase';
+import { MarkupType, PurchaseMode } from './calculator';
+import { BusinessProfile, TaskBlueprint, getBusinessProfile } from './businessProfiles';
 
 const SUPABASE_URL = 'https://cljzmisdceuxuzbwmnrz.supabase.co';
 
@@ -66,6 +69,8 @@ export interface UserProfile {
   onboarding_draft?: string;
   created_at?: string;
   avatar_color?: string;
+  /** Public URL of the user's profile photo; null falls back to initials. */
+  avatar_url?: string | null;
   push_notifications_enabled?: boolean;
   email_notifications_enabled?: boolean;
 }
@@ -99,6 +104,9 @@ export interface CommunityPost {
   id: string;
   author_id: string;
   author_name: string;
+  // Snapshotted at publish time: profiles are owner-only under RLS, so a
+  // viewer cannot read the author's row to look this up.
+  author_avatar_url?: string | null;
   business_name: string;
   business_type: string;
   location: string;
@@ -179,6 +187,7 @@ export const syncUserProfile = async (profile: UserProfile) => {
     if (profile.onboarding_step !== undefined) payload.onboarding_step = profile.onboarding_step;
     if (profile.onboarding_draft !== undefined) payload.onboarding_draft = profile.onboarding_draft;
     if (profile.avatar_color !== undefined) payload.avatar_color = profile.avatar_color;
+    if (profile.avatar_url !== undefined) payload.avatar_url = profile.avatar_url;
     if (profile.push_notifications_enabled !== undefined) payload.push_notifications_enabled = profile.push_notifications_enabled;
     if (profile.email_notifications_enabled !== undefined) payload.email_notifications_enabled = profile.email_notifications_enabled;
 
@@ -299,7 +308,47 @@ export const setCachedRoadmapTasks = (tasks: RoadmapTask[], userId?: string) => 
   }
 };
 
-export const getDefaultPhilippineRoadmapTasks = (userId: string, businessType?: string, location?: string): RoadmapTask[] => [
+/** Binds a business profile's task blueprint to a user and a step number. */
+const blueprintToTask = (
+  blueprint: TaskBlueprint,
+  userId: string,
+  id: string,
+  stepOrder: number
+): RoadmapTask => ({
+  id,
+  user_id: userId,
+  title: blueprint.title,
+  category: blueprint.category,
+  status: 'Pending',
+  desc: blueprint.desc,
+  step_order: stepOrder,
+  agency: blueprint.agency,
+  legal_basis: blueprint.legal_basis,
+  estimated_time: blueprint.estimated_time,
+  estimated_cost: blueprint.estimated_cost,
+  required_docs: blueprint.required_docs,
+  sub_steps: blueprint.sub_steps.map((title, index) => ({
+    id: `${id}-${index + 1}`,
+    title,
+    completed: false,
+  })),
+});
+
+/**
+ * Steps 1-5 are the universal Philippine registration path — identical whether
+ * you sell lugaw or groom dogs. Steps 6-7 are where businesses genuinely
+ * differ, so they come from the business profile: a service business gets
+ * "Price Your Services & Prepare Your Tools" where a store gets "Source
+ * Wholesale Stock". Pass `profile` explicitly during onboarding (it may be
+ * AI-generated for a custom type); other callers let it resolve from
+ * businessType.
+ */
+export const getDefaultPhilippineRoadmapTasks = (
+  userId: string,
+  businessType?: string,
+  location?: string,
+  profile?: BusinessProfile
+): RoadmapTask[] => [
   {
     id: '1',
     user_id: userId,
@@ -400,46 +449,11 @@ export const getDefaultPhilippineRoadmapTasks = (userId: string, businessType?: 
       { id: '5-4', title: 'Receive Employer ID Numbers for statutory monthly contribution remittance', completed: false },
     ],
   },
-  {
-    id: '6',
-    user_id: userId,
-    title: `Source Wholesale ${businessType || 'Goods'} & Product Costing`,
-    category: 'Supplies',
-    status: 'Pending',
-    desc: 'Establish direct supplier supply chain and compute profitable 35%+ markups.',
-    step_order: 6,
-    agency: 'Private Suppliers & Wholesalers',
-    legal_basis: 'RA 9178 BMBE Financial Compliance & Cost Accounting',
-    estimated_time: '2 - 3 Days',
-    estimated_cost: 'Operating Budget',
-    required_docs: ['Supplier Contacts List', 'Recipe / Costing Sheet', 'GCash Merchant QR'],
-    sub_steps: [
-      { id: '6-1', title: 'Research top 3 wholesale suppliers in Divisoria, Balintawak or local market', completed: false },
-      { id: '6-2', title: 'Itemize raw material & packaging costs per single unit', completed: false },
-      { id: '6-3', title: 'Add 35% - 50% profit margin markup to cover rent, utilities & net profit', completed: false },
-      { id: '6-4', title: 'Setup dedicated business e-wallet / GCash Merchant payment account', completed: false },
-    ],
-  },
-  {
-    id: '7',
-    user_id: userId,
-    title: 'Storefront Display Signage & 3-Day Soft Opening Promo',
-    category: 'Launch',
-    status: 'Pending',
-    desc: 'Compliant storefront launch with price tags and neighborhood introductory offer.',
-    step_order: 7,
-    agency: 'DTI Fair Trade Bureau & Local Community',
-    legal_basis: 'RA 7394 Consumer Act of the Philippines (Price Tag Law)',
-    estimated_time: '2 Days',
-    estimated_cost: '₱1,000 - ₱2,500',
-    required_docs: ['Compliance Posters (BIR 2303, DTI)', 'Price Menu Board', 'Promo Flyers'],
-    sub_steps: [
-      { id: '7-1', title: 'Display required compliance permits prominently (BIR 2303, DTI, Sanitary Permit)', completed: false },
-      { id: '7-2', title: 'Attach clear price tags / menu board on all products (RA 7394 Price Tag Law)', completed: false },
-      { id: '7-3', title: 'Set up GCash / Maya QR Code payment standee at customer counter', completed: false },
-      { id: '7-4', title: 'Run 3-day Soft Opening discount promo to test sales workflow and speed', completed: false },
-    ],
-  },
+  // Steps 6-7 come from the business profile, so a service business is never
+  // told to canvass wholesalers or hang price tags on merchandise it does not
+  // have. `profile` wins when onboarding passes an AI-generated one.
+  blueprintToTask((profile || getBusinessProfile(businessType)).operationsTask, userId, '6', 6),
+  blueprintToTask((profile || getBusinessProfile(businessType)).launchTask, userId, '7', 7),
 ];
 
 // ----------------------------------------------------
@@ -465,10 +479,15 @@ export interface OnboardingAnswers {
   obtainedPermits?: string[];
   insuranceStatus?: string;
   selectedRisks?: string[];
+  /** Answers to the business-type-specific questions on step 4, keyed by question id. */
+  extraAnswers?: { [questionId: string]: string };
+  /** True when the profile driving these questions was generated by Khora AI. */
+  aiTailored?: boolean;
 }
 
-// Shared with the onboarding Step 7 "Risks & Backup Plan" screen so the
-// contingency copy shown there and the copy saved into the roadmap match.
+// Legacy risk list, kept so roadmaps generated before business profiles
+// existed still resolve their contingency copy. New risks come from the
+// user's business profile — see services/businessProfiles.ts.
 export const RISK_CONTINGENCIES: { [risk: string]: string } = {
   'Slow sales': 'Launch a 3-day opening promotion and partner with neighboring stores for cross-referrals.',
   'Strong competition': 'Highlight your specific business advantage and offer GCash cash-in convenience or bundle items.',
@@ -498,7 +517,10 @@ const PERMIT_TASK_MAP: { [permitLabel: string]: string } = {
  */
 export const tailorRoadmapTasks = (
   tasks: RoadmapTask[],
-  answers: OnboardingAnswers
+  answers: OnboardingAnswers,
+  // Contingency copy for the risks this user was actually shown, which vary by
+  // business type. Falls back to the legacy list for older callers.
+  riskContingencies: { [risk: string]: string } = RISK_CONTINGENCIES
 ): RoadmapTask[] => {
   let tailored = tasks.map((task) => {
     if (!task.id) return task;
@@ -539,7 +561,7 @@ export const tailorRoadmapTasks = (
 
   if (answers.selectedRisks && answers.selectedRisks.length > 0) {
     const riskLines = answers.selectedRisks
-      .map((risk) => `• ${risk}: ${RISK_CONTINGENCIES[risk] || 'Review this risk with Khora AI for a tailored plan.'}`)
+      .map((risk) => `• ${risk}: ${riskContingencies[risk] || 'Review this risk with Khora AI for a tailored plan.'}`)
       .join('\n');
 
     tailored = [
@@ -559,7 +581,7 @@ export const tailorRoadmapTasks = (
         sub_steps: answers.selectedRisks.map((risk, idx) => ({
           id: `risk-${idx + 1}`,
           title: `Prepare for: ${risk}`,
-          desc: RISK_CONTINGENCIES[risk],
+          desc: riskContingencies[risk],
           completed: false,
         })),
       },
@@ -793,5 +815,235 @@ export const fetchSuppliersFromSupabase = async (category?: string, searchQuery?
     return { data, error };
   } catch (err) {
     return { data: null, error: err };
+  }
+};
+
+// ----------------------------------------------------
+// 8. Smart Calculator — per-product pricing/costing
+// ----------------------------------------------------
+export interface Product {
+  id: string;
+  user_id: string;
+
+  name: string;
+  category: string; // inferred by Khora AI, not typed by the user
+  image_url?: string | null;
+
+  // Which business roadmap this product's price book belongs to: 'active' for
+  // the user's live roadmap, otherwise a user_templates.id. The label is
+  // snapshotted so the list still reads correctly if that template is later
+  // renamed or deleted.
+  business_key?: string | null;
+  business_label?: string | null;
+
+  purchase_mode: PurchaseMode;
+  manual_cost_per_piece?: number | null;
+  pack_total_price?: number | null;
+  pack_item_count?: number | null;
+  bulk_quantity?: number | null; // total bought, e.g. 100 kg
+  bulk_total_price?: number | null;
+  bulk_portion_size?: number | null; // one sellable portion, in kilos or liters
+  bulk_portion_unit?: string | null; // how it was typed: 'kg' | 'g' | 'L' | 'ml'
+  bulk_pieces_yielded?: number | null; // derived: floor(quantity / portion)
+  batch_pieces?: number | null;
+
+  dagdag_gastos_per_piece: number;
+
+  // Derived from the final selling price rather than entered by hand —
+  // kept so the table still reads sensibly outside the app.
+  markup_type: MarkupType;
+  markup_value: number;
+
+  estimated_daily_units_sold?: number | null;
+
+  // What Khora AI recommended, kept even after a manual nudge so the
+  // original call is never lost.
+  ai_suggested_price?: number | null;
+  ai_suggested_markup_percent?: number | null;
+  ai_reasoning?: string | null;
+  ai_confidence?: string | null;
+  ai_tips?: string[] | null;
+  ai_source?: string | null;
+  price_source: 'ai' | 'manual';
+
+  // Computed results, snapshotted at save time — see computeCost /
+  // computeAtPrice in services/calculator.ts for how these are derived.
+  puhunan: number;
+  total_cost_per_piece: number;
+  exact_selling_price: number;
+  selling_price: number;
+  tubo_per_piece: number;
+  margin_percent: number;
+  markup_percent_effective: number;
+  batch_total_investment: number;
+  batch_total_profit_potential: number;
+  breakeven_units?: number | null;
+  breakeven_days?: number | null;
+  remaining_pieces_as_profit?: number | null;
+
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const fetchUserProducts = async (userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    return { data: data as Product[] | null, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
+/**
+ * The distinct category names this user's products already use. Fed back into
+ * the pricing form so a new product joins an existing category instead of
+ * creating a near-duplicate of it.
+ */
+export const fetchUserProductCategories = async (userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('category')
+      .eq('user_id', userId);
+
+    const categories = Array.from(
+      new Set(((data as { category?: string }[] | null) || []).map((row) => (row.category || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
+
+    return { data: categories, error };
+  } catch (err) {
+    return { data: [] as string[], error: err };
+  }
+};
+
+export const fetchProductById = async (id: string, userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+    return { data: data as Product | null, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
+export const createProduct = async (
+  product: Omit<Product, 'id' | 'created_at' | 'updated_at'>
+) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .insert({ ...product, updated_at: new Date().toISOString() })
+      .select()
+      .single();
+    return { data: data as Product | null, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
+export const updateProduct = async (
+  id: string,
+  userId: string,
+  updates: Partial<Omit<Product, 'id' | 'user_id' | 'created_at'>>
+) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+    return { data: data as Product | null, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
+export const deleteProduct = async (id: string, userId: string) => {
+  try {
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    return { error };
+  } catch (err) {
+    return { error: err };
+  }
+};
+
+/**
+ * Uploads a profile photo to the public "avatars" bucket, under a path
+ * prefixed with the owner's Firebase UID — matching the ownership check in
+ * week15_profile_photos.sql. The bucket is public-read because community
+ * posts must render the author's photo for viewers who cannot read the
+ * author's profile row.
+ */
+export const uploadAvatarImage = async (
+  userId: string,
+  base64Data: string,
+  fileExt: 'jpg' | 'png' = 'jpg'
+): Promise<{ url: string | null; error: any }> => {
+  try {
+    const path = `${userId}/avatar-${Date.now()}.${fileExt}`;
+    const contentType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, decodeBase64(base64Data), { contentType, upsert: false });
+
+    if (uploadError) {
+      console.warn('Avatar upload failed:', uploadError);
+      return { url: null, error: uploadError };
+    }
+
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return { url: data.publicUrl, error: null };
+  } catch (err) {
+    console.warn('Avatar upload exception:', err);
+    return { url: null, error: err };
+  }
+};
+
+/**
+ * Uploads a product photo (as base64, straight from expo-image-picker's
+ * `base64: true` result) to the "product-images" storage bucket, under a
+ * path prefixed with the owner's Firebase UID — matching the ownership
+ * check in week12_smart_calculator.sql's storage policies. Returns a public
+ * URL, since the bucket itself is public (same pattern as every other image
+ * already used in this app).
+ */
+export const uploadProductImage = async (
+  userId: string,
+  base64Data: string,
+  fileExt: 'jpg' | 'png' = 'jpg'
+): Promise<{ url: string | null; error: any }> => {
+  try {
+    const path = `${userId}/product-${Date.now()}.${fileExt}`;
+    const contentType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+
+    const { error: uploadError } = await supabase.storage
+      .from('product-images')
+      .upload(path, decodeBase64(base64Data), { contentType, upsert: false });
+
+    if (uploadError) {
+      console.warn('Product image upload failed:', uploadError);
+      return { url: null, error: uploadError };
+    }
+
+    const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+    return { url: data.publicUrl, error: null };
+  } catch (err) {
+    console.warn('Product image upload exception:', err);
+    return { url: null, error: err };
   }
 };

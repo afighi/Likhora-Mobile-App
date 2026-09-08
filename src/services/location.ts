@@ -8,6 +8,13 @@ import * as Location from 'expo-location';
 export interface LocationItem {
   code: string;
   name: string;
+  // Concise label for anywhere this item is displayed/stored outside the
+  // picker itself (profile badges, roadmap/supplier location text, etc).
+  // Falls back to `name` when absent. Needed because a few items — the NCR
+  // "provinces" below — use a long, descriptive `name` (listing every city
+  // in the district) specifically to help a user pick the right one, which
+  // is far too long to show anywhere else.
+  shortName?: string;
   regionCode?: string;
   provinceCode?: string;
   cityCode?: string;
@@ -56,10 +63,10 @@ export const getProvincesByRegionAsync = async (regionCode: string): Promise<Loc
   // NCR Special Handling
   if (regionCode === '130000000') {
     const ncrProvinces = [
-      { code: '133900000', name: 'Metro Manila (First District - City of Manila)', regionCode },
-      { code: '137400000', name: 'Metro Manila (Second District - QC, Mandaluyong, Marikina, Pasig, San Juan)', regionCode },
-      { code: '137500000', name: 'Metro Manila (Third District - Caloocan, Malabon, Navotas, Valenzuela)', regionCode },
-      { code: '137600000', name: 'Metro Manila (Fourth District - Makati, Taguig, Pasay, Parañaque, Las Piñas, Muntinlupa, Pateros)', regionCode },
+      { code: '133900000', name: 'Metro Manila (First District - City of Manila)', shortName: 'Metro Manila (1st District)', regionCode },
+      { code: '137400000', name: 'Metro Manila (Second District - QC, Mandaluyong, Marikina, Pasig, San Juan)', shortName: 'Metro Manila (2nd District)', regionCode },
+      { code: '137500000', name: 'Metro Manila (Third District - Caloocan, Malabon, Navotas, Valenzuela)', shortName: 'Metro Manila (3rd District)', regionCode },
+      { code: '137600000', name: 'Metro Manila (Fourth District - Makati, Taguig, Pasay, Parañaque, Las Piñas, Muntinlupa, Pateros)', shortName: 'Metro Manila (4th District)', regionCode },
     ];
     provincesCache[regionCode] = ncrProvinces;
     return ncrProvinces;
@@ -200,7 +207,7 @@ export const detectCurrentDeviceLocation = async (): Promise<DetectedLocationRes
 
     const detectedRegion = PHILIPPINE_REGIONS[0]; // NCR or match
     const provinces = await getProvincesByRegionAsync(detectedRegion.code);
-    const detectedProvince = provinces[0] || { code: '137400000', name: provinceName, regionCode: detectedRegion.code };
+    const detectedProvince = provinces[0] || { code: '137400000', name: provinceName, shortName: provinceName, regionCode: detectedRegion.code };
 
     const cities = await getCitiesByProvinceAsync(detectedProvince.code, detectedRegion.code);
     const matchedCity = cities.find(c => c.name.toLowerCase().includes(cityName.toLowerCase())) || cities[0] || { code: '137401000', name: cityName, provinceCode: detectedProvince.code };
@@ -263,7 +270,7 @@ export const geocodePhilippineLocation = async (
 
 const getFallbackLocationResult = (): DetectedLocationResult => {
   const reg = PHILIPPINE_REGIONS[0];
-  const prov = { code: '137400000', name: 'Metro Manila (Second District)', regionCode: reg.code };
+  const prov = { code: '137400000', name: 'Metro Manila (Second District)', shortName: 'Metro Manila (2nd District)', regionCode: reg.code };
   const city = { code: '137401000', name: 'Quezon City', provinceCode: prov.code };
   const brgy = { code: '137401001', name: 'Barangay Cubao / Socorro', cityCode: city.code };
 

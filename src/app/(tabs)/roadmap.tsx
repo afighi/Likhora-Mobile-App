@@ -5,10 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
   ActivityIndicator,
-  Alert,
   Modal
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import {
   CheckCircle2,
@@ -28,7 +29,15 @@ import {
   Scale,
   ShieldCheck,
   Lock,
-  Check
+  Check,
+  Search,
+  Coffee,
+  Utensils,
+  Globe,
+  Scissors,
+  Shirt,
+  PawPrint,
+  Droplets,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -36,6 +45,14 @@ import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useNotification } from '@/context/NotificationContext';
 import { fetchUserRoadmap, saveUserRoadmap, RoadmapTask, getDefaultPhilippineRoadmapTasks } from '@/services/supabase';
+import {
+  STARTUP_TEMPLATES,
+  TEMPLATE_CATEGORIES,
+  TemplateCategory,
+  TemplateIcon,
+  filterTemplates,
+} from '@/services/startupTemplates';
+import { notify } from '@/utils/dialog';
 import { askKhoraAI } from '@/services/claude';
 
 // Helper to guarantee authentic legal basis, agency, timeline, cost, required docs, and actionable sub-steps for any task
@@ -174,6 +191,18 @@ const ensureSubSteps = (task: RoadmapTask): RoadmapTask => {
   };
 };
 
+// startupTemplates.ts stays UI-free, so it names an icon and this maps it.
+const TEMPLATE_ICONS: Record<TemplateIcon, React.ComponentType<{ size?: number; color?: string }>> = {
+  coffee: Coffee,
+  store: Store,
+  utensils: Utensils,
+  globe: Globe,
+  scissors: Scissors,
+  shirt: Shirt,
+  'paw-print': PawPrint,
+  droplets: Droplets,
+};
+
 export default function RoadmapTab() {
   const router = useRouter();
   const { user, userProfile } = useAuth();
@@ -186,6 +215,8 @@ export default function RoadmapTab() {
   const [taskAiAdviceMap, setTaskAiAdviceMap] = useState<Record<string, string>>({});
   const [loadingAi, setLoadingAi] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateCategory, setTemplateCategory] = useState<TemplateCategory | null>(null);
 
   // Load User Roadmap from Supabase or generate default
   useEffect(() => {
@@ -329,7 +360,7 @@ export default function RoadmapTab() {
     await saveUserRoadmap(newTasks);
     setShowTemplates(false);
 
-    Alert.alert('New Roadmap Started!', `Switched active launch plan to "${templateName}". Real Philippine legal steps are now loaded.`);
+    notify('New Roadmap Started', `Your active plan is now "${templateName}". Its Philippine legal steps are loaded.`);
   };
 
   // Calculate Progress
@@ -351,200 +382,7 @@ export default function RoadmapTab() {
   };
 
   // Template Library
-  const STARTUP_TEMPLATES = [
-    {
-      title: 'Milk Tea & Beverage Kiosk',
-      budget: '₱25,000 – ₱50,000',
-      tasksCount: '6 Legal & Prep Steps',
-      desc: 'Authentic Philippine setup guide for boba milk tea, fruit teas, and cup sealing kiosks.',
-      tasks: [
-        { 
-          title: 'Secure Commercial Kiosk Location', 
-          category: 'Supplies', 
-          status: 'Pending' as const, 
-          desc: 'Inspect high-foot traffic location with electrical voltage and water outlet access.',
-          legal_basis: 'Article 1643 Civil Code of the Philippines (Lease Contracts)',
-          agency: 'Lessor / Mall BPLO Desk',
-          estimated_time: '2 - 4 Days',
-          estimated_cost: '₱5,000 Deposit',
-          required_docs: ['Commercial Lease Agreement', 'Lessor Valid ID'],
-          sub_steps: [
-            { id: 'mt-1-1', title: 'Survey 3 high foot-traffic spots near schools or transport terminals', completed: false },
-            { id: 'mt-1-2', title: 'Verify electrical load voltage and clean water line accessibility', completed: false },
-            { id: 'mt-1-3', title: 'Negotiate monthly rental rate and advance deposit terms', completed: false },
-            { id: 'mt-1-4', title: 'Sign notarized Commercial Lease Agreement', completed: false },
-          ]
-        },
-        { 
-          title: 'Barangay & DTI Name Registration', 
-          category: 'Permits', 
-          status: 'Pending' as const, 
-          desc: 'Register business name as Milk Tea Kiosk.',
-          legal_basis: 'Act No. 3883 & RA 9178 BMBE Act',
-          agency: 'DTI BNRS & Barangay Hall',
-          estimated_time: '1 Day',
-          estimated_cost: '₱730',
-          required_docs: ['Valid Government ID', 'Cedula'],
-          sub_steps: [
-            { id: 'mt-2-1', title: 'Register DTI Business Name online at BNRS portal', completed: false },
-            { id: 'mt-2-2', title: 'Obtain Barangay Micro-Business Clearance', completed: false },
-            { id: 'mt-2-3', title: 'Apply for City Health Food Sanitary Permit', completed: false },
-          ]
-        },
-        { 
-          title: 'Source Boba, Teas & Sealer Machine', 
-          category: 'Supplies', 
-          status: 'Pending' as const, 
-          desc: 'Buy wholesale tapioca pearls, syrup, and cup sealer from Divisoria.',
-          legal_basis: 'RA 7394 Consumer Act & Food Safety Standards',
-          agency: 'Wholesale Distributors',
-          estimated_time: '2 Days',
-          estimated_cost: '₱15,000',
-          required_docs: ['Supplier Equipment Warranty', 'Price Quotations'],
-          sub_steps: [
-            { id: 'mt-3-1', title: 'Purchase manual or auto cup sealing machine with warranty', completed: false },
-            { id: 'mt-3-2', title: 'Buy bulk tapioca pearls, tea leaves & flavor syrups', completed: false },
-            { id: 'mt-3-3', title: 'Procure custom printed 16oz & 22oz PP cups with plastic film', completed: false },
-          ]
-        },
-        { 
-          title: 'Recipe Standard Costing & Margins', 
-          category: 'Finance', 
-          status: 'Pending' as const, 
-          desc: 'Compute exact ingredient cost per 16oz and 22oz cup serving.',
-          legal_basis: 'BMBE Cost Accounting Standards',
-          agency: 'Internal Operations',
-          estimated_time: '1 Day',
-          estimated_cost: 'Free',
-          required_docs: ['Recipe Sheet', 'Packaging Cost Log'],
-          sub_steps: [
-            { id: 'mt-4-1', title: 'Measure raw tea brewed per liter cost', completed: false },
-            { id: 'mt-4-2', title: 'Calculate pearl, syrup, ice & cup cost per serving', completed: false },
-            { id: 'mt-4-3', title: 'Set menu prices for 16oz (₱49-₱69) and 22oz (₱69-₱89)', completed: false },
-          ]
-        },
-        { 
-          title: 'Sanitary Permit & Mayor Clearance', 
-          category: 'Permits', 
-          status: 'Pending' as const, 
-          desc: 'Obtain food handler sanitary clearance from City Health Office.',
-          legal_basis: 'PD 856 Sanitation Code of the Philippines',
-          agency: 'City Health Office & BPLO',
-          estimated_time: '3 Days',
-          estimated_cost: '₱1,200',
-          required_docs: ['Chest X-ray Result', 'Stool Sample Test', 'Health Card'],
-          sub_steps: [
-            { id: 'mt-5-1', title: 'Undergo medical check & chest X-ray for food handlers', completed: false },
-            { id: 'mt-5-2', title: 'Obtain City Health Sanitary Permit card', completed: false },
-            { id: 'mt-5-3', title: 'File Mayor Business License at City Hall BPLO desk', completed: false },
-          ]
-        },
-        { 
-          title: 'Buy-1-Take-1 Opening Promo', 
-          category: 'Launch', 
-          status: 'Pending' as const, 
-          desc: 'Run 2-day opening buy-1-take-1 promo for students.',
-          legal_basis: 'RA 7394 Price Tag & Sales Promotion Law',
-          agency: 'DTI Fair Trade Bureau',
-          estimated_time: '2 Days',
-          estimated_cost: '₱2,000 Promo Budget',
-          required_docs: ['Promo Tarpaulin Banner'],
-          sub_steps: [
-            { id: 'mt-6-1', title: 'Hang Grand Opening Buy-1-Take-1 Tarpaulin Banner', completed: false },
-            { id: 'mt-6-2', title: 'Distribute discount flyers at nearby schools & tricycle terminals', completed: false },
-            { id: 'mt-6-3', title: 'Conduct soft opening launch to test cup sealing speed', completed: false },
-          ]
-        },
-      ],
-    },
-    {
-      title: 'Sari-Sari Store & GCash Cash-In Hub',
-      budget: '₱10,000 – ₱25,000',
-      tasksCount: '5 Legal & Retail Steps',
-      desc: 'Neighborhood retail store with GCash, Maya cash-in & load services.',
-      tasks: [
-        { 
-          title: 'Barangay Micro-Business Permit', 
-          category: 'Permits', 
-          status: 'Pending' as const, 
-          desc: 'Apply at Barangay Hall for Sari-sari store clearance.',
-          legal_basis: 'RA 9178 BMBE Act & RA 7160',
-          agency: 'Barangay Hall BPLO',
-          estimated_time: '1 Day',
-          estimated_cost: '₱300',
-          required_docs: ['Valid ID', 'Cedula'],
-          sub_steps: [
-            { id: 'ss-1-1', title: 'Submit Barangay Business Clearance application', completed: false },
-            { id: 'ss-1-2', title: 'Pay Barangay store permit fee', completed: false },
-            { id: 'ss-1-3', title: 'Post Barangay clearance near store window', completed: false },
-          ]
-        },
-        { 
-          title: 'Build Display Shelves & Security Grill', 
-          category: 'Supplies', 
-          status: 'Pending' as const, 
-          desc: 'Setup secure store window and inventory shelves.',
-          legal_basis: 'Local Building Code & Security Ordinance',
-          agency: 'Local Contractor / Hardware',
-          estimated_time: '2 Days',
-          estimated_cost: '₱3,500',
-          required_docs: ['Store Layout Plan'],
-          sub_steps: [
-            { id: 'ss-2-1', title: 'Install sturdy wooden multi-tier wall shelves', completed: false },
-            { id: 'ss-2-2', title: 'Setup metal security screen window with lock', completed: false },
-            { id: 'ss-2-3', title: 'Install glass container jars for candies and snacks', completed: false },
-          ]
-        },
-        { 
-          title: 'Wholesale Grocery Procurement', 
-          category: 'Supplies', 
-          status: 'Pending' as const, 
-          desc: 'Stock fast-moving canned goods, instant noodles, and snacks.',
-          legal_basis: 'Standard Commercial Wholesale Sourcing',
-          agency: 'Wholesale Supermarket / Public Market',
-          estimated_time: '1 Day',
-          estimated_cost: '₱8,000',
-          required_docs: ['Grocery Sourcing List'],
-          sub_steps: [
-            { id: 'ss-3-1', title: 'Purchase wholesale canned goods (sardines, corned beef)', completed: false },
-            { id: 'ss-3-2', title: 'Buy bulk instant noodles, sachet shampoo, and laundry soap', completed: false },
-            { id: 'ss-3-3', title: 'Stock soft drinks & chilled bottled water in freezer', completed: false },
-          ]
-        },
-        { 
-          title: 'Setup GCash & Load Merchant Account', 
-          category: 'Finance', 
-          status: 'Pending' as const, 
-          desc: 'Verify GCash fully-verified account for cash-in service fees.',
-          legal_basis: 'BSP E-Money & Merchant Regulations',
-          agency: 'GCash / Maya Merchant Division',
-          estimated_time: '1 Day',
-          estimated_cost: 'Free',
-          required_docs: ['Valid ID', 'GCash Merchant QR'],
-          sub_steps: [
-            { id: 'ss-4-1', title: 'Upgrade GCash account to Fully Verified status', completed: false },
-            { id: 'ss-4-2', title: 'Print GCash QR Code standee for cash-in / cash-out', completed: false },
-            { id: 'ss-4-3', title: 'Establish 2% service fee schedule for cash transactions', completed: false },
-          ]
-        },
-        { 
-          title: 'Grand Neighborhood Opening', 
-          category: 'Launch', 
-          status: 'Pending' as const, 
-          desc: 'Announce store opening to neighbors.',
-          legal_basis: 'RA 7394 Consumer Act (Price Tag Law)',
-          agency: 'Local Neighborhood Community',
-          estimated_time: '1 Day',
-          estimated_cost: '₱500',
-          required_docs: ['Price Tag Signage'],
-          sub_steps: [
-            { id: 'ss-5-1', title: 'Label clear price tags on all store items', completed: false },
-            { id: 'ss-5-2', title: 'Open store window at 6:00 AM for early morning commuters', completed: false },
-          ]
-        },
-      ],
-    },
-  ];
+  const visibleTemplates = filterTemplates(STARTUP_TEMPLATES, templateSearch, templateCategory);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -626,33 +464,121 @@ export default function RoadmapTab() {
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             <Text style={styles.sectionHeaderTitle}>Startup Roadmap Templates</Text>
             <Text style={styles.sectionSubTitle}>
-              Switch to a pre-built roadmap template based on real Philippine legal & business requirements.
+              Ready-made launch plans built on real Philippine legal and business requirements — for
+              your first business, or the next one.
             </Text>
 
-            {STARTUP_TEMPLATES.map((tmpl, idx) => (
-              <View key={idx} style={styles.templateCard}>
-                <View style={styles.templateCardTop}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.templateTitle}>{tmpl.title}</Text>
-                    <Text style={styles.templateMeta}>{tmpl.budget} • {tmpl.tasksCount}</Text>
-                  </View>
-                  <View style={styles.templateBadge}>
-                    <Bookmark size={14} color={LikhoraColors.primary} />
-                  </View>
-                </View>
+            <View style={styles.templateSearchBox}>
+              <Search size={15} color={LikhoraColors.textPlaceholder} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.templateSearchInput}
+                placeholder="Search templates"
+                placeholderTextColor={LikhoraColors.textPlaceholder}
+                value={templateSearch}
+                onChangeText={setTemplateSearch}
+                returnKeyType="search"
+              />
+              {templateSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setTemplateSearch('')} hitSlop={10}>
+                  <X size={15} color={LikhoraColors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
 
-                <Text style={styles.templateDesc}>{tmpl.desc}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.templateChipRow}
+            >
+              <TouchableOpacity
+                style={[styles.templateChip, !templateCategory && styles.templateChipSelected]}
+                onPress={() => setTemplateCategory(null)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.templateChipText, !templateCategory && styles.templateChipTextSelected]}>
+                  All {STARTUP_TEMPLATES.length}
+                </Text>
+              </TouchableOpacity>
 
+              {TEMPLATE_CATEGORIES.map((category) => {
+                const count = STARTUP_TEMPLATES.filter((t) => t.category === category).length;
+                const selected = templateCategory === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    style={[styles.templateChip, selected && styles.templateChipSelected]}
+                    onPress={() => setTemplateCategory(selected ? null : category)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.templateChipText, selected && styles.templateChipTextSelected]}>
+                      {category} {count}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {visibleTemplates.length === 0 ? (
+              <View style={styles.templateEmpty}>
+                <Text style={styles.templateEmptyTitle}>No templates match</Text>
+                <Text style={styles.templateEmptyText}>
+                  Try a different search, or clear the filters to see all {STARTUP_TEMPLATES.length}.
+                </Text>
                 <TouchableOpacity
-                  style={styles.startTemplateBtn}
-                  onPress={() => handleStartTemplate(tmpl.title, tmpl.tasks)}
-                  activeOpacity={0.85}
+                  style={styles.templateClearBtn}
+                  onPress={() => {
+                    setTemplateSearch('');
+                    setTemplateCategory(null);
+                  }}
+                  activeOpacity={0.8}
                 >
-                  <Text style={styles.startTemplateBtnText}>Start This Roadmap</Text>
-                  <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                  <Text style={styles.templateClearText}>Clear filters</Text>
                 </TouchableOpacity>
               </View>
-            ))}
+            ) : (
+              visibleTemplates.map((tmpl) => {
+                const Icon = TEMPLATE_ICONS[tmpl.icon];
+                return (
+                  <View key={tmpl.id} style={styles.templateCard}>
+                    {/* A photo when one is bundled, otherwise an accent banner —
+                        so a template without artwork still looks designed
+                        rather than like a failed image load. */}
+                    {tmpl.image ? (
+                      <Image source={tmpl.image} style={styles.templateImage} contentFit="cover" transition={150} />
+                    ) : (
+                      <View style={[styles.templateBanner, { backgroundColor: tmpl.accent }]}>
+                        <Icon size={30} color="#FFFFFF" />
+                      </View>
+                    )}
+
+                    <View style={styles.templateBody}>
+                      <View style={styles.templateCardTop}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.templateTitle}>{tmpl.title}</Text>
+                          <Text style={styles.templateMeta}>
+                            {tmpl.budget} • {tmpl.tasks.length} steps
+                          </Text>
+                        </View>
+                        <View style={styles.templateBadge}>
+                          <Bookmark size={14} color={LikhoraColors.primary} />
+                        </View>
+                      </View>
+
+                      <Text style={styles.templateDesc}>{tmpl.desc}</Text>
+
+                      <TouchableOpacity
+                        style={styles.startTemplateBtn}
+                        onPress={() => handleStartTemplate(tmpl.title, tmpl.tasks)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.startTemplateBtnText}>Start This Roadmap</Text>
+                        <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </ScrollView>
         ) : loading ? (
           <View style={styles.centerLoading}>
@@ -1354,13 +1280,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     backgroundColor: LikhoraColors.inputBackground,
   },
-  templateChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: LikhoraColors.secondaryLavender,
-    borderWidth: 1,
-    borderColor: LikhoraColors.softPurple,
-  },
   filterChipActive: {
     backgroundColor: LikhoraColors.primary,
   },
@@ -1437,14 +1356,84 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
     fontFamily: LikhoraFont.fontFamily,
   },
+  templateSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+    paddingHorizontal: 14,
+    height: 42,
+    marginBottom: 10,
+  },
+  templateSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+    padding: 0,
+  },
+  templateChipRow: { gap: 6, paddingVertical: 4, paddingRight: Spacing.four, marginBottom: Spacing.three },
+  templateChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: Radius.pill,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+  },
+  templateChipSelected: { backgroundColor: LikhoraColors.primary, borderColor: LikhoraColors.primary },
+  templateChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  templateChipTextSelected: { color: '#FFFFFF' },
+
+  templateEmpty: { alignItems: 'center', paddingVertical: Spacing.five },
+  templateEmptyTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    marginBottom: 6,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  templateEmptyText: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: Spacing.three,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  templateClearBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+    backgroundColor: '#FFFFFF',
+  },
+  templateClearText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+
   templateCard: {
     backgroundColor: LikhoraColors.inputBackground,
     borderRadius: Radius.xlarge,
-    padding: Spacing.four,
     marginBottom: Spacing.three,
     borderWidth: 1.5,
     borderColor: LikhoraColors.border,
+    overflow: 'hidden',
   },
+  templateImage: { width: '100%', height: 130 },
+  templateBanner: { width: '100%', height: 90, alignItems: 'center', justifyContent: 'center' },
+  templateBody: { padding: Spacing.four },
   templateCardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',

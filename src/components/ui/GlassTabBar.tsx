@@ -124,13 +124,11 @@ const GlassTabButton: React.FC<GlassTabButtonProps> = ({
     }
     if (route.name === 'ai-assistant') {
       return (
-        <View style={[styles.aiIconBadge, isFocused && styles.aiIconBadgeActive]}>
-          <Image
-            source={require('../../../assets/images/tabIcons/likhoralogo.png')}
-            resizeMode="contain"
-            style={{ width: 28, height: 28 }}
-          />
-        </View>
+        <Image
+          source={require('../../../assets/images/tabIcons/likhoralogo.png')}
+          resizeMode="contain"
+          style={{ width: 28, height: 28 }}
+        />
       );
     }
     if (route.name === 'suppliers') {
@@ -215,35 +213,5 @@ const styles = StyleSheet.create({
   },
   tabItemHovered: {
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
-  },
-  aiIconBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: LikhoraColors.secondaryLavender,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.95)',
-    elevation: 6,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0 4px 12px rgba(74, 21, 75, 0.25)' } as any)
-      : {
-          shadowColor: LikhoraColors.primary,
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.25,
-          shadowRadius: 8,
-        }),
-  },
-  aiIconBadgeActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: LikhoraColors.primary,
-    borderWidth: 2,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0 4px 14px rgba(74, 21, 75, 0.35)' } as any)
-      : {
-          shadowOpacity: 0.35,
-          shadowRadius: 10,
-        }),
   },
 });
