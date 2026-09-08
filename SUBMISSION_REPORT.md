@@ -258,141 +258,259 @@ To capture the required screenshots for your submission:
 
 ## 6. System Architecture & Flowchart Diagrams
 
+Both diagrams below are defined in Mermaid and render directly on GitHub and in
+VS Code. They are the authoritative, current version of the architecture — if a
+static image is required for a printed submission, export these blocks from
+[mermaid.live](https://mermaid.live) rather than reusing an older screenshot.
+
 ### A. High-Level System Architecture Diagram
 
-![System Architecture Diagram](./assets/system_architecture_diagram.png)
+**Likhora AI — 5-Tier Architecture.** The application separates presentation,
+client state, client-side services, server-side Edge Functions, and the data and
+external-API layer. Every arrow is labelled with the HTTP method or protocol it
+actually uses.
 
-The Likhora AI mobile application follows a 4-tier modular architecture separating presentation screens, client state providers, integration services, and backend cloud APIs:
+The tier that matters most for security is **Tier 4**. The Anthropic API key and
+the Firebase Admin service account are never bundled into the Expo app — anything
+shipped in the bundle is readable by anyone who installs it. Both live as Supabase
+secrets and are used only inside Deno Edge Functions, so the client can ask for a
+price or a password reset but can never see the credentials that fulfil it.
 
 ```mermaid
 graph TD
-    %% User Device Layer
-    subgraph Client["Client Application (Expo / React Native - LikhAI)"]
-        subgraph UI["UI & Router Layer (Expo Router)"]
-            AuthScreens["Auth Screens (Login / Signup / Forgot Password)"]
-            Onboarding["Onboarding Screen (PSGC Regional Selector)"]
-            
-            subgraph Navigation["Bottom Tab Navigation"]
-                HomeTab["Home Dashboard (index.tsx)"]
-                RoadmapTab["Roadmap & Task CRUD (roadmap.tsx)"]
-                SuppliersTab["Supplier Finder (suppliers.tsx)"]
-                AITab["Khora AI Assistant (ai-assistant.tsx)"]
-                CommunityTab["Community Marketplace (community.tsx)"]
-            end
+    %% ================= TIER 1 =================
+    subgraph T1["TIER 1 — Presentation Layer (Expo Router, React Native)"]
+        direction TB
+        Auth["Auth Screens<br/>login · signup · forgot-password"]
+        Onboard["Onboarding<br/>onboarding.tsx"]
+        subgraph Tabs["Bottom Tab Navigation"]
+            Home["Home Dashboard<br/>index.tsx"]
+            Roadmap["Roadmap + Templates<br/>roadmap.tsx"]
+            Suppliers["Supplier Finder<br/>suppliers.tsx"]
+            Khora["Khora AI Assistant<br/>ai-assistant.tsx"]
+            Community["Community Marketplace<br/>community.tsx"]
         end
-
-        subgraph State["Global State & Context"]
-            AuthCtx["AuthContext (User Session & Profile)"]
-            NotifCtx["NotificationContext (Alert System)"]
-        end
-
-        subgraph Services["Service Layer (src/services)"]
-            SupaService["Supabase Service (supabase.ts)"]
-            LocService["Location Service (location.ts)"]
-            AIService["Claude AI Service (claude.ts)"]
-            FBService["Firebase Auth Service (firebase.ts)"]
+        subgraph Stack["Stack Screens"]
+            Calc["Smart Calculator<br/>calculator.tsx · calculator-product.tsx"]
+            Profile["Profile and Settings<br/>profile.tsx"]
+            Templates["Template Library<br/>my-templates.tsx · template-builder.tsx"]
+            Notifs["Notifications<br/>notifications.tsx"]
         end
     end
 
-    %% External APIs & Database Layer
-    subgraph Backend["Backend Infrastructure & External APIs"]
-        subgraph SupabaseDB["Supabase Cloud (PostgreSQL REST API)"]
-            TableRoadmaps[("roadmaps Table")]
-            TableSuppliers[("suppliers Table")]
-            TableCommunity[("community_posts Table")]
-            TableNotifs[("notifications Table")]
-        end
+    %% ================= TIER 2 =================
+    subgraph T2["TIER 2 — Client State (React Context)"]
+        AuthCtx["AuthContext<br/>session · profile · route gate"]
+        NotifCtx["NotificationContext<br/>unread badge · alerts"]
+    end
 
-        subgraph ExternalAPIs["External REST APIs"]
-            OSMAPI["OpenStreetMap Overpass API (Live Geo Query)"]
-            PSGCAPI["PSGC API (Regions, Provinces, Cities)"]
-            ClaudeAPI["Anthropic Claude API (Khora Advisor)"]
-            FBAuth["Firebase Auth Server"]
+    %% ================= TIER 3 =================
+    subgraph T3["TIER 3 — Client Services (src/services)"]
+        DataSvc["Data Service<br/>supabase.ts"]
+        AuthSvc["Auth Services<br/>firebase.ts · passwordReset.ts"]
+        Advisors["AI Advisors<br/>pricingAdvisor · onboardingAdvisor · supplierAdvisor"]
+        Domain["Domain Logic — pure, no I/O<br/>calculator.ts · businessProfiles.ts · startupTemplates.ts"]
+        Geo["Location and Places<br/>location.ts · places.ts"]
+        Mail["Email Service<br/>emailjs.ts"]
+    end
+
+    %% ================= TIER 4 =================
+    subgraph T4["TIER 4 — Supabase Edge Functions (Deno) — SERVER-SIDE SECRETS"]
+        KhoraFn["khora-ai<br/>holds ANTHROPIC_API_KEY<br/>fixes model · effort · token cap"]
+        ResetFn["password-reset<br/>holds FIREBASE_SERVICE_ACCOUNT<br/>generates · hashes · verifies OTP"]
+    end
+
+    %% ================= TIER 5 =================
+    subgraph T5["TIER 5 — Data and External APIs"]
+        subgraph Supa["Supabase Cloud"]
+            PG[("PostgreSQL — 9 tables<br/>RLS via Firebase JWT sub claim")]
+            Storage[("Storage Buckets<br/>product-images · avatars")]
+        end
+        subgraph Ext["External REST APIs"]
+            FBAuth["Firebase Authentication"]
+            Anthropic["Anthropic Claude API<br/>claude-opus-5"]
+            IdentityKit["Google Identity Toolkit<br/>Firebase Admin REST"]
+            Places["Google Places API (New)"]
+            OSM["OpenStreetMap<br/>Overpass · Nominatim"]
+            PSGC["PSGC API<br/>PH regions · provinces · cities"]
+            EmailJS["EmailJS<br/>OTP delivery"]
         end
     end
 
-    %% Interactions & Data Flow
-    AuthScreens -->|Authenticates| FBService
-    FBService -->|Validates Session| FBAuth
-    Onboarding -->|Queries Regions & Cities| LocService
-    LocService -->|GET Request| PSGCAPI
+    %% ---------- Tier 1 to Tier 2 ----------
+    AuthCtx -.->|provides session| T1
+    NotifCtx -.->|provides unread count| T1
 
-    RoadmapTab -->|CRUD Operations| SupaService
-    SupaService -->|PostgREST HTTP| TableRoadmaps
-    SupaService -->|PostgREST HTTP| TableNotifs
+    %% ---------- Tier 1 to Tier 3 ----------
+    Auth -->|sign in / sign up| AuthSvc
+    Auth -->|reset request| AuthSvc
+    Onboard -->|region lookup| Geo
+    Onboard -->|profile for custom type| Advisors
+    Roadmap -->|task CRUD| DataSvc
+    Roadmap -->|template catalogue| Domain
+    Suppliers -->|supplier targeting| Advisors
+    Suppliers -->|place search| Geo
+    Khora -->|business question| Advisors
+    Community -->|posts and favourites| DataSvc
+    Calc -->|cost math| Domain
+    Calc -->|price suggestion| Advisors
+    Calc -->|product CRUD + photo| DataSvc
+    Profile -->|profile update + avatar| DataSvc
+    Templates -->|template CRUD| DataSvc
+    Notifs -->|read / mark read| DataSvc
 
-    SuppliersTab -->|POST Overpass QL Query| OSMAPI
-    SuppliersTab -->|Fallback Query| SupaService
-    SupaService -->|PostgREST HTTP| TableSuppliers
+    %% ---------- Tier 3 to Tier 4 ----------
+    Advisors -->|POST invoke, JWT verified| KhoraFn
+    AuthSvc -->|POST invoke, public| ResetFn
 
-    AITab -->|Prompt Query| AIService
-    AIService -->|POST Request| ClaudeAPI
+    %% ---------- Tier 3 direct to Tier 5 ----------
+    DataSvc -->|"PostgREST: GET · POST · PATCH · DELETE"| PG
+    DataSvc -->|multipart upload| Storage
+    AuthSvc -->|HTTPS SDK| FBAuth
+    Geo -->|GET| PSGC
+    Geo -->|GET nearby / text search| Places
+    Geo -->|POST Overpass QL · GET Nominatim| OSM
+    Mail -->|POST send| EmailJS
 
-    CommunityTab -->|Publish / Import Templates| SupaService
-    SupaService -->|PostgREST HTTP| TableCommunity
+    %% ---------- Tier 4 to Tier 5 ----------
+    KhoraFn -->|POST /v1/messages| Anthropic
+    ResetFn -->|"service role: SELECT · INSERT · UPDATE"| PG
+    ResetFn -->|accounts:lookup · accounts:update| IdentityKit
+    ResetFn -->|POST send code| EmailJS
 
-    AuthCtx -->|Provides User Session| UI
-    NotifCtx -->|Displays Alerts| UI
+    %% ---------- Auth token flow ----------
+    FBAuth -.->|"ID token used as Supabase access token"| DataSvc
 ```
 
-### B. System Data & User Operations Flowchart
+**Legend**
 
-![System Flowchart Diagram](./assets/system_flowchart_diagram.png)
+| Notation | Meaning |
+|---|---|
+| Solid arrow | A request, labelled with its HTTP method or protocol |
+| Dotted arrow | State or credentials provided, not a network call |
+| `[( )]` cylinder | Persistent storage |
+| Tier 4 | Runs on Supabase servers; the only tier holding secrets |
 
-The operational flowchart illustrates the user lifecycle and explicit data operations mapped directly to the 9 PostgreSQL tables defined in the ERD (`public.profiles`, `public.roadmaps`, `public.notifications`, `public.suppliers`, `public.community_posts`, `public.community_template_favorites`, `public.user_templates`, `public.products`, and `public.password_reset_otps`):
+**Key architectural decisions visible above**
+
+1. **No secret ever reaches the client.** Tier 3 can invoke Tier 4, but only Tier 4 talks to Anthropic and Firebase Admin.
+2. **One auth identity, two backends.** Firebase issues the ID token; Supabase accepts it as its access token, so RLS policies enforce ownership with `auth.jwt() ->> 'sub'` without a second login.
+3. **Domain logic is pure.** `calculator.ts`, `businessProfiles.ts` and `startupTemplates.ts` perform no I/O, so the same functions drive the on-screen preview and the values written to the database.
+4. **Every AI path degrades.** If Tier 4 is unreachable, the advisors fall back to deterministic local logic rather than failing.
+
+### B. System Data and User Operations Flowchart
+
+**User lifecycle and database operations.** Each terminal node names the exact SQL
+operation and table involved, mapped to the 9 PostgreSQL tables in the ERD:
+`profiles`, `roadmaps`, `notifications`, `suppliers`, `community_posts`,
+`community_template_favorites`, `user_templates`, `products`, and
+`password_reset_otps`.
 
 ```mermaid
 flowchart TD
-    Start([User Opens Likhora AI]) --> CheckAuth{Is User Authenticated?}
+    Start([User opens Likhora AI]) --> CheckAuth{Authenticated?}
 
-    %% 1. Auth & Profiles Table Flow
-    CheckAuth -- No --> AuthScreen[Login / Signup Screen]
-    AuthScreen --> RegisterUser[Authenticate via Firebase / Supabase Auth]
-    RegisterUser --> OnboardingStep[Onboarding Process]
-    OnboardingStep --> FetchPSGC[Fetch Regions & Cities via PSGC API]
-    FetchPSGC --> UpsertProfile[UPSERT public.profiles]
-    UpsertProfile --> MainApp
+    %% ---------- 1. AUTH AND PROFILE ----------
+    CheckAuth -- No --> AuthScreen[Login / Signup screen]
+    AuthScreen --> AuthChoice{Which action?}
+    AuthChoice -- Sign up --> SignupForm[Validate name, email, password]
+    SignupForm --> SendOTP[EmailJS: send 6-digit code]
+    SendOTP --> VerifyOTP{Code correct?}
+    VerifyOTP -- No --> SendOTP
+    VerifyOTP -- Yes --> CreateUser[Firebase: create account]
+    CreateUser --> OnboardFlow
 
-    CheckAuth -- Yes --> FetchProfile[SELECT FROM public.profiles]
-    FetchProfile --> MainApp[Likhora AI Dashboard]
+    AuthChoice -- Forgot password --> ResetReq[Edge Function: request code]
+    ResetReq --> ResetStore[("INSERT INTO password_reset_otps<br/>SHA-256 hash, 10-min expiry")]
+    ResetStore --> ResetVerify{Code valid and unexpired?}
+    ResetVerify -- No, max 5 tries --> ResetReq
+    ResetVerify -- Yes --> SetPass[Firebase Admin: set new password]
+    SetPass --> ResetDone[("UPDATE password_reset_otps<br/>SET consumed_at")] --> AuthScreen
 
-    %% Main Application Feature Branches
-    MainApp --> SelectedTab{User Selects Feature Tab}
+    CheckAuth -- Yes --> FetchProfile[("SELECT FROM profiles<br/>WHERE id = firebase_uid")]
+    FetchProfile --> Onboarded{Onboarding complete?}
+    Onboarded -- No --> OnboardFlow[Onboarding wizard]
+    Onboarded -- Yes --> MainApp
 
-    %% 2. Roadmaps Table Flow
-    SelectedTab -- Roadmap Tab --> FetchRoadmaps[SELECT FROM public.roadmaps WHERE user_id = profile.id]
-    FetchRoadmaps --> RenderRoadmaps[Display Tasks & Sub-steps]
-    RenderRoadmaps --> TaskAction{Task Action?}
-    TaskAction -- Add Custom Task --> ValidateInput[Validate Title & Category] --> InsertRoadmap[INSERT INTO public.roadmaps] --> TriggerNotif[INSERT INTO public.notifications milestone] --> RefreshRoadmap[Refresh UI & Progress Meter]
-    TaskAction -- Toggle Task / Sub-step --> UpdateRoadmap[UPDATE public.roadmaps SET status, sub_steps] --> RefreshRoadmap
-    TaskAction -- Delete Task --> DeleteRoadmap[DELETE FROM public.roadmaps WHERE id = task_id] --> RefreshRoadmap
+    %% ---------- 2. ONBOARDING ----------
+    OnboardFlow --> PickType{Business type?}
+    PickType -- One of 5 built-in --> LoadProfile[Load business profile:<br/>customers, risks, permits]
+    PickType -- Custom --> GenProfile[Khora AI: generate questions,<br/>risks and roadmap steps]
+    GenProfile --> LoadProfile
+    LoadProfile --> FetchPSGC[GET PSGC API: region, province, city]
+    FetchPSGC --> SaveProfile[("UPSERT profiles")]
+    SaveProfile --> GenRoadmap[("INSERT INTO roadmaps<br/>tailored launch steps")]
+    GenRoadmap --> MainApp[Dashboard]
 
-    %% 3. Suppliers Table Flow
-    SelectedTab -- Suppliers Tab --> GeoCheck{Get Current GPS Location?}
-    GeoCheck -- Location Available --> OverpassAPI[POST Query to OpenStreetMap Overpass REST API]
-    OverpassAPI --> OverpassSuccess{Response OK?}
-    OverpassSuccess -- Yes --> HaversineCalc[Compute Haversine Distance & Sort Nearest-First] --> DisplayOSM[Display Verified OSM Suppliers + Map Pins]
-    OverpassSuccess -- No / Timeout --> QuerySuppliersDB[SELECT FROM public.suppliers WHERE category / location] --> DisplaySuppliersDB[Display Database Suppliers]
-    GeoCheck -- Location Unavailable --> QuerySuppliersDB
+    %% ---------- 3. FEATURE BRANCHES ----------
+    MainApp --> Feature{Feature selected}
 
-    %% 4. Notifications Table Flow
-    SelectedTab -- Notifications --> FetchNotifs[SELECT FROM public.notifications WHERE user_id = profile.id]
-    FetchNotifs --> RenderNotifs[Display Alerts & Milestones]
-    RenderNotifs --> MarkRead[UPDATE public.notifications SET read = true]
+    %% Roadmap
+    Feature -- Roadmap --> ReadRoadmap[("SELECT FROM roadmaps<br/>WHERE user_id")]
+    ReadRoadmap --> TaskAct{Action?}
+    TaskAct -- Add task --> ValidTask[Validate title and category] --> CreateTask[("INSERT INTO roadmaps")] --> Milestone[("INSERT INTO notifications")]
+    TaskAct -- Toggle status or sub-step --> UpdTask[("UPDATE roadmaps<br/>SET status, sub_steps")] --> Milestone
+    TaskAct -- Delete task --> DelTask[("DELETE FROM roadmaps")]
+    TaskAct -- Start a template --> ApplyTmpl[("REPLACE roadmaps<br/>from startupTemplates catalogue")]
 
-    %% 5. AI Assistant Flow
-    SelectedTab -- AI Assistant Tab --> InputPrompt[User Submits Business Question]
-    InputPrompt --> CallClaude[POST to Khora AI Claude Service]
-    CallClaude --> RenderAIResponse[Display AI Business Advice & Tips]
+    %% Smart Calculator
+    Feature -- Smart Calculator --> ReadProd[("SELECT FROM products<br/>search, filter, sort")]
+    ReadProd --> ProdAct{Action?}
+    ProdAct -- Add or edit --> EnterCost[User enters cost only:<br/>purchase mode, price, quantity]
+    EnterCost --> ComputeCost[calculator.ts: derive cost per piece]
+    ComputeCost --> AskKhora[Edge Function: suggest price]
+    AskKhora --> Validate{Price above cost<br/>and below 6x cost?}
+    Validate -- No --> Offline[Deterministic offline suggestion]
+    Validate -- Yes --> ShowPrice[Show price, profit, margin, break-even]
+    Offline --> ShowPrice
+    ShowPrice --> SaveProd[("INSERT or UPDATE products<br/>+ photo to Storage")]
+    ProdAct -- Delete --> ConfirmDel{Confirm dialog} -- Yes --> DelProd[("DELETE FROM products")]
 
-    %% 6. Community Posts & Favorites Table Flow
-    SelectedTab -- Community Tab --> FetchCommunity[SELECT FROM public.community_posts ORDER BY created_at DESC]
-    FetchCommunity --> RenderCommunity[Display Likha Community Templates]
-    RenderCommunity --> CommunityAction{User Action?}
-    CommunityAction -- Favorite Template --> InsertFav[INSERT INTO public.community_template_favorites]
-    CommunityAction -- Unfavorite --> DeleteFav[DELETE FROM public.community_template_favorites]
-    CommunityAction -- Share Own Roadmap --> InsertCommunity[INSERT INTO public.community_posts author_id = profile.id]
+    %% Suppliers
+    Feature -- Suppliers --> SupProfile[Khora AI: supplier categories<br/>for this specific trade]
+    SupProfile --> GPS{GPS available?}
+    GPS -- Yes --> PlacesQ[GET Google Places: per-trade search]
+    PlacesQ --> PlacesOK{Results returned?}
+    PlacesOK -- Yes --> Haversine[Compute distance, sort nearest first] --> ShowSup[Display suppliers and map pins]
+    PlacesOK -- No --> SupaSup[("SELECT FROM suppliers")] --> ShowSup
+    GPS -- No --> SupaSup
+    SupaSup -.->|last resort| OSMQ[POST Overpass QL] --> ShowSup
+
+    %% Khora chat
+    Feature -- Khora AI --> Prompt[User asks a business question]
+    Prompt --> KhoraFn2[Edge Function: khora-ai]
+    KhoraFn2 --> Reachable{Reachable?}
+    Reachable -- Yes --> Advice[Display Claude response]
+    Reachable -- No --> LocalAdv[Local keyword advisor] --> Advice
+
+    %% Community
+    Feature -- Community --> ReadPosts[("SELECT FROM community_posts<br/>ORDER BY created_at DESC")]
+    ReadPosts --> CommAct{Action?}
+    CommAct -- Favourite --> Fav[("INSERT or DELETE<br/>community_template_favorites")]
+    CommAct -- Publish --> PubPost[("INSERT INTO community_posts<br/>with author_avatar_url snapshot")]
+    CommAct -- Import --> ImportTmpl[("REPLACE roadmaps<br/>from template_data")]
+
+    %% Profile
+    Feature -- Profile --> ReadProf[("SELECT FROM profiles")]
+    ReadProf --> ProfAct{Action?}
+    ProfAct -- Edit details --> UpdProf[("UPDATE profiles")]
+    ProfAct -- Change photo --> UpAvatar[Upload to avatars bucket] --> UpdProf
+    ProfAct -- Save template --> SaveTmpl[("INSERT INTO user_templates")]
+
+    %% Notifications
+    Feature -- Notifications --> ReadNotif[("SELECT FROM notifications")]
+    ReadNotif --> MarkRead[("UPDATE notifications SET read = true")]
 ```
+
+**Flowchart notation**
+
+| Notation | Meaning |
+|---|---|
+| `([ ])` stadium | Entry point |
+| `{ }` diamond | Decision or branch |
+| `[( )]` cylinder | A database or storage operation, with the exact SQL verb and table |
+| `[ ]` rectangle | Client-side processing or display |
+| Dotted arrow | Fallback path taken only when the preferred path fails |
 
 ---
 
@@ -403,8 +521,6 @@ The database for **Likhora AI** is built on Supabase Cloud (PostgreSQL), consist
 `password_reset_otps` is stricter still: RLS is enabled with **zero policies**, so no client role can read or write it at all. It is reachable only by the `password-reset` Edge Function, which runs with the service role. That isolation is deliberate — a reset code readable from the client would be an account-takeover path.
 
 ### A. Visual Entity Relationship Diagram (ERD)
-
-![Database ERD Diagram](./assets/database_erd_diagram.png)
 
 ```mermaid
 erDiagram
