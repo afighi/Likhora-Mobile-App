@@ -94,7 +94,7 @@
   *Evidence:* Signal abort after 4000ms for external Overpass API, automatic fallback to Supabase SQL suppliers database or offline dataset when API fails.
 - [x] **Authentication/Authorization Implemented (if applicable)**  
   *Status:* **Checked / Implemented**  
-  *Evidence:* Auth context provider ([`src/context/AuthContext.tsx`](file:///c:/Users/hiverpc/LikhAI/src/context/AuthContext.tsx)), Firebase authentication, a root navigation gate that forces onboarding/login before any other screen ([`src/app/_layout.tsx`](file:///c:/Users/hiverpc/LikhAI/src/app/_layout.tsx)), and real database-level enforcement: Firebase is configured as a Supabase Third-Party Auth provider so every request carries a verified ID token, and Postgres Row Level Security policies ([`supabase/week8_secure_user_data.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/week8_secure_user_data.sql)) restrict `roadmaps`/`profiles`/`notifications` to their owning user only. This was verified directly, not assumed: an earlier version of this data was fully readable/writable by any anonymous client, confirmed and then closed.
+  *Evidence:* Auth context provider ([`src/context/AuthContext.tsx`](file:///c:/Users/hiverpc/LikhAI/src/context/AuthContext.tsx)), Firebase authentication, a root navigation gate that forces onboarding/login before any other screen ([`src/app/_layout.tsx`](file:///c:/Users/hiverpc/LikhAI/src/app/_layout.tsx)), and real database-level enforcement: Firebase is configured as a Supabase Third-Party Auth provider so every request carries a verified ID token, and Postgres Row Level Security policies ([`supabase/05_secure_user_data.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/05_secure_user_data.sql)) restrict `roadmaps`/`profiles`/`notifications` to their owning user only. This was verified directly, not assumed: an earlier version of this data was fully readable/writable by any anonymous client, confirmed and then closed.
 - [x] **API Documentation Available**  
   *Status:* **Checked / Implemented**  
   *Evidence:* Written documentation in [`SUBMISSION_REPORT.md`](file:///c:/Users/hiverpc/LikhAI/SUBMISSION_REPORT.md) detailing endpoints, HTTP request methods, headers, payload formats, and JSON response samples.
@@ -114,7 +114,7 @@
   ⚠️ **Note:** the official `Midterm_Project_Submission_Checklist.docx` currently marks this item as complete, which conflicts with the "In Progress" status tracked here. Reconcile before submitting — either finish the slide deck, or update the official checklist to match reality.
 - [x] **Sample Data Available for Testing**  
   *Status:* **Checked / Implemented**  
-  *Evidence:* Seeded database suppliers dataset, 35 curated community roadmap templates across all 7 business categories ([`supabase/week6_community_templates.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/week6_community_templates.sql)), and sample community post items.
+  *Evidence:* Seeded database suppliers dataset, 35 curated community roadmap templates across all 7 business categories ([`supabase/03_community_templates.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/03_community_templates.sql)), and sample community post items.
 - [x] **Project Repository Updated**  
   *Status:* **Checked / Implemented**  
   *Evidence:* Pushed to [github.com/afighi/Likhora-Mobile-App](https://github.com/afighi/Likhora-Mobile-App) — `main` branch is current through commit `2b4dba4`, containing all security, feature, and documentation work described in this checklist.
@@ -137,7 +137,7 @@ Here are the specific locations to screenshot for your midterm evaluation submis
 
 3. **Database Screenshot**:
    - **Supabase Console**: Open [Supabase Dashboard](https://supabase.com/dashboard) -> **Table Editor** -> select `roadmaps` or `suppliers` table. Screenshot rows, columns (`id`, `title`, `user_id`, `category`), and table schema. Also worth screenshotting **Authentication** -> **Policies** for `roadmaps`/`profiles`/`notifications` to show the owner-only RLS policies are active.
-   - **SQL Editor**: Screenshot [`supabase/week8_secure_user_data.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/week8_secure_user_data.sql) inside Supabase SQL Editor showing successful script execution.
+   - **SQL Editor**: Screenshot [`supabase/05_secure_user_data.sql`](file:///c:/Users/hiverpc/LikhAI/supabase/05_secure_user_data.sql) inside Supabase SQL Editor showing successful script execution.
 
 4. **Source Code Samples for Key Features**:
    - Screenshot [`src/services/supabase.ts`](file:///c:/Users/hiverpc/LikhAI/src/services/supabase.ts) showing functions `saveUserRoadmap`, `deleteRoadmapTask`, `createUserTemplate`, and `createCommunityPost`.

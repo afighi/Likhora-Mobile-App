@@ -1,4 +1,4 @@
--- Run this once in the Supabase SQL Editor, AFTER week12_smart_calculator.sql.
+-- Run this once in the Supabase SQL Editor, AFTER 09_smart_calculator.sql.
 --
 -- Turns the Smart Calculator into an actually-smart one:
 --

@@ -37,7 +37,7 @@
 
 ### E. Firebase Authentication + Supabase Row Level Security (data access control)
 - **What it is**: this app authenticates users via Firebase, not Supabase's own Auth. Firebase is configured as a Supabase Third-Party Auth provider (Supabase Dashboard → Authentication → Third Party Auth), so every Supabase request (`src/services/supabase.ts`) carries the current Firebase user's verified ID token.
-- **Why it matters**: Postgres Row Level Security policies (`supabase/week8_secure_user_data.sql`) enforce, at the database level, that a user can only read or write their own `roadmaps`, `profiles`, and `notifications` rows — verified directly by attempting unauthenticated reads/writes with the app's public anon key and confirming they are rejected. `community_posts` and `suppliers` remain intentionally public-readable, since they're shared reference/community data by design.
+- **Why it matters**: Postgres Row Level Security policies (`supabase/05_secure_user_data.sql`) enforce, at the database level, that a user can only read or write their own `roadmaps`, `profiles`, and `notifications` rows — verified directly by attempting unauthenticated reads/writes with the app's public anon key and confirming they are rejected. `community_posts` and `suppliers` remain intentionally public-readable, since they're shared reference/community data by design.
 
 ---
 
@@ -51,7 +51,7 @@ The project relies on a modular architecture separating UI screens, API services
 - **`src/services/supabase.ts`**: Supabase client service handling CRUD operations for user profiles, roadmaps, notifications, community templates, personal template library, and database supplier queries. Also configures Firebase-token-authenticated requests for Row Level Security (see Section 1E).
 - **`src/services/places.ts`**: Google Places API (New) integration for accurate, photo-rich supplier search, with business-type-aware filtering.
 - **`src/services/location.ts`**: Philippine Standard Geographic Code (PSGC) API service supporting 17 regions, 82 provinces, and 1,600+ municipalities with fallback datasets, plus device GPS (via `expo-location`) and forward-geocoding of saved locations.
-- **`supabase/week4_crud_and_community.sql`** through **`week10_profile_preferences.sql`**: Incremental schema migrations — see [`CRUD.md`](./CRUD.md) for the full run order and what each one does.
+- **`supabase/01_crud_and_community.sql`** through **`07_profile_preferences.sql`**: Incremental schema migrations — see [`CRUD.md`](./CRUD.md) for the full run order and what each one does.
 
 ---
 

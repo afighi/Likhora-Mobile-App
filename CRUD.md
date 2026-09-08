@@ -21,14 +21,14 @@ Validation prevents saving a template without a name or without at least one tit
 
 Run these once, **in order**, in the Supabase SQL Editor:
 
-1. [`supabase/week4_crud_and_community.sql`](./supabase/week4_crud_and_community.sql) — base roadmap/community schema.
-2. [`supabase/week5_supplier_photos.sql`](./supabase/week5_supplier_photos.sql) — optional supplier image column.
-3. [`supabase/week6_community_templates.sql`](./supabase/week6_community_templates.sql) — seeds the 35 curated community templates.
-4. [`supabase/week7_fix_community_rls.sql`](./supabase/week7_fix_community_rls.sql) — fixes Community tab read access.
+1. [`supabase/01_crud_and_community.sql`](./supabase/01_crud_and_community.sql) — base roadmap/community schema.
+2. [`supabase/02_supplier_photos.sql`](./supabase/02_supplier_photos.sql) — optional supplier image column.
+3. [`supabase/03_community_templates.sql`](./supabase/03_community_templates.sql) — seeds the 35 curated community templates.
+4. [`supabase/04_fix_community_rls.sql`](./supabase/04_fix_community_rls.sql) — fixes Community tab read access.
 5. **Prerequisite for steps 6–8**: add Firebase as a Third-Party Auth provider in the Supabase Dashboard (Authentication → Sign In / Providers → Third Party Auth → Firebase → your Firebase Project ID). Without this, steps 6–8 will lock everyone out of their own data instead of just their own.
-6. [`supabase/week8_secure_user_data.sql`](./supabase/week8_secure_user_data.sql) — enforces that a user can only read/write their own roadmap, profile, and notifications.
-7. [`supabase/week9_user_templates.sql`](./supabase/week9_user_templates.sql) — personal template library table.
-8. [`supabase/week10_profile_preferences.sql`](./supabase/week10_profile_preferences.sql) — avatar color and notification preference columns (no auth prerequisite, safe to run anytime).
+6. [`supabase/05_secure_user_data.sql`](./supabase/05_secure_user_data.sql) — enforces that a user can only read/write their own roadmap, profile, and notifications.
+7. [`supabase/06_user_templates.sql`](./supabase/06_user_templates.sql) — personal template library table.
+8. [`supabase/07_profile_preferences.sql`](./supabase/07_profile_preferences.sql) — avatar color and notification preference columns (no auth prerequisite, safe to run anytime).
 
 ## Suggested screenshots for submission
 

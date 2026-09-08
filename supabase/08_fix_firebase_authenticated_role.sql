@@ -1,7 +1,7 @@
 -- Run this once in the Supabase SQL Editor.
 --
--- Fixes: every owner-only RLS policy added in week8_secure_user_data.sql
--- and week9_user_templates.sql was scoped "to authenticated" — but Firebase
+-- Fixes: every owner-only RLS policy added in 05_secure_user_data.sql
+-- and 06_user_templates.sql was scoped "to authenticated" — but Firebase
 -- ID tokens don't carry a `role` claim the way Supabase's own auth tokens
 -- do, so PostgREST has been resolving every request from this app as the
 -- `anon` Postgres role instead, even with the Firebase Third-Party Auth

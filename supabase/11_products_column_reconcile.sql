@@ -1,4 +1,4 @@
--- Run this once in the Supabase SQL Editor, AFTER week13_smart_calculator_ai.sql.
+-- Run this once in the Supabase SQL Editor, AFTER 10_smart_calculator_ai.sql.
 --
 -- Reconciles public.products with what the app actually inserts.
 --

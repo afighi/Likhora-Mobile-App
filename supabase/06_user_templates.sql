@@ -1,5 +1,5 @@
 -- Run this ONLY after the Firebase Third-Party Auth setup from
--- week8_secure_user_data.sql is live (Supabase Dashboard -> Authentication
+-- 05_secure_user_data.sql is live (Supabase Dashboard -> Authentication
 -- -> Sign In / Providers -> Third Party Auth -> Firebase, plus the app's
 -- updated src/services/supabase.ts). Same reasoning as week8: policies here
 -- require every request to carry a Supabase-verified Firebase ID token, so

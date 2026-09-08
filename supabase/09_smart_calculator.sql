@@ -9,7 +9,7 @@
 -- back what they spent on that batch (break-even / ROI).
 --
 -- Uses the same "to public" RLS pattern established in
--- week11_fix_firebase_authenticated_role.sql: Firebase-issued JWTs don't
+-- 08_fix_firebase_authenticated_role.sql: Firebase-issued JWTs don't
 -- carry Supabase's own `role` claim, so PostgREST does not resolve these
 -- requests to the `authenticated` Postgres role — policies scoped
 -- `to public` still fully enforce per-user ownership via
@@ -19,7 +19,7 @@
 -- NOTE: this is "create table if not exists" — if public.products already
 -- exists from an earlier draft of this file, running it again does NOTHING and
 -- the table keeps whatever columns it was originally built with. See
--- week14_products_column_reconcile.sql, which repairs exactly that drift.
+-- 11_products_column_reconcile.sql, which repairs exactly that drift.
 
 create table if not exists public.products (
   id uuid primary key default gen_random_uuid(),

@@ -1,7 +1,7 @@
 -- Run once in the Supabase SQL Editor.
 --
 -- Fixes: the Community tab shows zero posts for every user, including the
--- 35 templates from week6_community_templates.sql, even though the rows
+-- 35 templates from 03_community_templates.sql, even though the rows
 -- exist in the table (confirmed via SQL Editor). Root cause: Row Level
 -- Security is blocking every anon-key read on these tables, most likely
 -- because RLS is enabled with no SELECT policy ever defined for them.

@@ -4,7 +4,7 @@
 -- that photo onto community posts so a shared roadmap shows who published it.
 --
 -- Why the photo URL is COPIED onto the post rather than joined from profiles:
--- week8_secure_user_data.sql scopes profiles to owner-only SELECT, so one user
+-- 05_secure_user_data.sql scopes profiles to owner-only SELECT, so one user
 -- cannot read another user's profile row at all. A join would return nothing.
 -- Snapshotting at publish time matches how business_label and the roadmap
 -- template data are already stored, and means a post keeps rendering even if

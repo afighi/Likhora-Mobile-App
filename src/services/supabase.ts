@@ -984,7 +984,7 @@ export const deleteProduct = async (id: string, userId: string) => {
 /**
  * Uploads a profile photo to the public "avatars" bucket, under a path
  * prefixed with the owner's Firebase UID — matching the ownership check in
- * week15_profile_photos.sql. The bucket is public-read because community
+ * 12_profile_photos.sql. The bucket is public-read because community
  * posts must render the author's photo for viewers who cannot read the
  * author's profile row.
  */
@@ -1018,7 +1018,7 @@ export const uploadAvatarImage = async (
  * Uploads a product photo (as base64, straight from expo-image-picker's
  * `base64: true` result) to the "product-images" storage bucket, under a
  * path prefixed with the owner's Firebase UID — matching the ownership
- * check in week12_smart_calculator.sql's storage policies. Returns a public
+ * check in 09_smart_calculator.sql's storage policies. Returns a public
  * URL, since the bucket itself is public (same pattern as every other image
  * already used in this app).
  */
