@@ -9,6 +9,17 @@
         "start"
       ],
       "port": 8081
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "admin-web",
+        "run",
+        "dev"
+      ],
+      "port": 5173
     }
   ]
 }

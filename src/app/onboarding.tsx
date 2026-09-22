@@ -49,16 +49,16 @@ import {
   getBusinessProfile,
 } from '@/services/businessProfiles';
 import { generateCustomBusinessProfile } from '@/services/onboardingAdvisor';
-import { 
-  PHILIPPINE_REGIONS, 
-  getProvincesByRegionAsync, 
-  getCitiesByProvinceAsync, 
-  getBarangaysByCityAsync, 
-  detectCurrentDeviceLocation, 
-  generateAILocationCheck, 
-  LocationItem, 
-  AILocationAnalysis 
+import {
+  PHILIPPINE_REGIONS,
+  getProvincesByRegionAsync,
+  getCitiesByProvinceAsync,
+  getBarangaysByCityAsync,
+  detectCurrentDeviceLocation,
+  geocodePhilippineLocation,
+  LocationItem,
 } from '@/services/location';
+import { analyzeMarket, saveMarketAnalysis, MarketAnalysisResult } from '@/services/marketAnalysis';
 import { SearchableDropdownModal } from '@/components/ui/SearchableDropdownModal';
 
 // businessProfiles.ts stays UI-free, so it names an icon and this maps it.
@@ -100,7 +100,11 @@ export default function OnboardingScreen() {
 
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [locationDetectedText, setLocationDetectedText] = useState('');
-  const [aiLocationCheck, setAiLocationCheck] = useState<AILocationAnalysis | null>(null);
+  const [marketAnalysis, setMarketAnalysis] = useState<MarketAnalysisResult | null>(null);
+  const [analyzingMarket, setAnalyzingMarket] = useState(false);
+  // Segments the AI flagged as needing explicit confirmation (under-18) before
+  // they're treated as part of the target market — never assumed silently.
+  const [confirmedSegments, setConfirmedSegments] = useState<Set<string>>(new Set());
 
   // STEP 4 State: Market & Product
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
@@ -269,6 +273,39 @@ export default function OnboardingScreen() {
     }
   };
 
+  /**
+   * Real market/location analysis: geocodes the chosen city, pulls actual
+   * nearby competitor listings (rating + review count) via Places, and lets
+   * Khora AI reason about saturation from density AND review signal together
+   * — never from a hardcoded "food = 88, retail = 78" table like before.
+   */
+  const runMarketAnalysis = async (businessType: string, locationLabel: string) => {
+    setAnalyzingMarket(true);
+    setConfirmedSegments(new Set());
+    try {
+      const coords = await geocodePhilippineLocation(locationLabel);
+      if (!coords) {
+        setMarketAnalysis(null);
+        return;
+      }
+      const result = await analyzeMarket({
+        businessType,
+        locationLabel,
+        lat: coords.lat,
+        lng: coords.lng,
+      });
+      setMarketAnalysis(result);
+      if (user?.uid) {
+        // Fire-and-forget: the onboarding flow shouldn't block on this write.
+        saveMarketAnalysis(user.uid, { businessType, locationLabel, lat: coords.lat, lng: coords.lng }, result).catch(
+          (e) => console.warn('Could not save market analysis:', e)
+        );
+      }
+    } finally {
+      setAnalyzingMarket(false);
+    }
+  };
+
   // ----------------------------------------------------
   // Dynamic Cascading Location Listeners (PSGC API)
   // ----------------------------------------------------
@@ -304,10 +341,11 @@ export default function OnboardingScreen() {
         setLoadingLocationList(false);
       });
       const bType = selectedCategory === 'other' ? customCategory : selectedCategory;
-      setAiLocationCheck(generateAILocationCheck(bType || 'Business', selectedCity.name));
+      runMarketAnalysis(bType || 'Business', selectedCity.name);
     } else {
       setBarangaysList([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runMarketAnalysis is stable per render and re-adding it would refire this on every keystroke elsewhere in the form
   }, [selectedCity, selectedCategory, customCategory]);
 
   // Detect GPS Location
@@ -342,7 +380,7 @@ export default function OnboardingScreen() {
 
     if (result.city) {
       const bType = selectedCategory === 'other' ? customCategory : selectedCategory;
-      setAiLocationCheck(generateAILocationCheck(bType || 'Business', result.city.name));
+      runMarketAnalysis(bType || 'Business', result.city.name);
     }
   };
 
@@ -816,22 +854,87 @@ export default function OnboardingScreen() {
                   disabled={!selectedCity}
                 />
 
-                {/* AI Location Check Card */}
-                {aiLocationCheck && (
+                {/* Market & Location Analysis Card */}
+                {analyzingMarket && (
                   <View style={styles.aiLocationCard}>
                     <View style={styles.aiLocHeader}>
-                      <View style={styles.scoreBadge}>
-                        <Text style={styles.scoreText}>{aiLocationCheck.overallScore}</Text>
+                      <ActivityIndicator size="small" color="#0EA5E9" />
+                      <Text style={[styles.metaLocText, { marginLeft: 8 }]}>
+                        Checking nearby businesses and reviews...
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {!analyzingMarket && marketAnalysis && (
+                  <View style={styles.aiLocationCard}>
+                    <View style={styles.aiLocHeader}>
+                      <View
+                        style={[
+                          styles.saturationBadge,
+                          marketAnalysis.saturationSignal === 'opportunity' && styles.saturationOpportunity,
+                          marketAnalysis.saturationSignal === 'crowded' && styles.saturationCrowded,
+                        ]}
+                      >
+                        <Text style={styles.saturationBadgeText}>
+                          {marketAnalysis.saturationSignal === 'opportunity'
+                            ? 'Opportunity'
+                            : marketAnalysis.saturationSignal === 'crowded'
+                            ? 'Crowded'
+                            : marketAnalysis.saturationSignal === 'balanced'
+                            ? 'Balanced'
+                            : 'Unclear'}
+                        </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.verdictText}>Verdict: {aiLocationCheck.verdict}</Text>
+                        <Text style={styles.verdictText}>
+                          {marketAnalysis.competitorCount} similar business{marketAnalysis.competitorCount === 1 ? '' : 'es'} nearby
+                        </Text>
                         <Text style={styles.metaLocText}>
-                          Foot Traffic: {aiLocationCheck.footTraffic} • Competition: {aiLocationCheck.competition}
+                          {marketAnalysis.avgCompetitorRating != null
+                            ? `Avg. rating ${marketAnalysis.avgCompetitorRating} ★ (${marketAnalysis.avgReviewCount ?? 0} reviews avg.)`
+                            : 'No review data available nearby'}
+                          {marketAnalysis.source === 'offline' ? ' · offline estimate' : ''}
                         </Text>
                       </View>
                     </View>
 
-                    <Text style={styles.aiLocRecText}>{aiLocationCheck.recommendation}</Text>
+                    <Text style={styles.aiLocRecText}>{marketAnalysis.recommendation}</Text>
+
+                    {marketAnalysis.suggestedTargetMarket.segments.length > 0 && (
+                      <View style={styles.segmentsWrap}>
+                        <Text style={styles.segmentsTitle}>Suggested target market</Text>
+                        <Text style={styles.aiLocRecText}>{marketAnalysis.suggestedTargetMarket.summary}</Text>
+                        <View style={styles.segmentChipsRow}>
+                          {marketAnalysis.suggestedTargetMarket.segments.map((seg, idx) => {
+                            const key = `${seg.label}-${idx}`;
+                            const needsConfirm = seg.requiresAcceptabilityConfirmation && !confirmedSegments.has(key);
+                            return (
+                              <TouchableOpacity
+                                key={key}
+                                style={[styles.segmentChip, needsConfirm && styles.segmentChipPending]}
+                                onPress={() => {
+                                  if (!seg.requiresAcceptabilityConfirmation) return;
+                                  setConfirmedSegments((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(key)) next.delete(key);
+                                    else next.add(key);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <Text style={styles.segmentChipText}>
+                                  {seg.label} ({seg.ageRange})
+                                </Text>
+                                {needsConfirm && (
+                                  <Text style={styles.segmentChipWarn}>Tap to confirm this age group</Text>
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    )}
                   </View>
                 )}
 
@@ -1493,6 +1596,68 @@ const styles = StyleSheet.create({
     color: '#0C4A6E',
     lineHeight: 18,
     fontFamily: LikhoraFont.fontFamily,
+  },
+  saturationBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+    backgroundColor: '#0EA5E9',
+    marginRight: 10,
+  },
+  saturationOpportunity: {
+    backgroundColor: '#16A34A',
+  },
+  saturationCrowded: {
+    backgroundColor: '#D97706',
+  },
+  saturationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  segmentsWrap: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#BAE6FD',
+  },
+  segmentsTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0369A1',
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 4,
+  },
+  segmentChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    gap: 8,
+  },
+  segmentChip: {
+    backgroundColor: '#E0F2FE',
+    borderRadius: Radius.large,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  segmentChipPending: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+  },
+  segmentChipText: {
+    fontSize: 12,
+    color: '#0C4A6E',
+    fontWeight: '600',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  segmentChipWarn: {
+    fontSize: 10,
+    color: '#92400E',
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 2,
   },
   disclaimerRow: {
     flexDirection: 'row',

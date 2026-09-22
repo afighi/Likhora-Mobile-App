@@ -303,49 +303,7 @@ const getFallbackBarangays = (cityCode: string): LocationItem[] => [
   { code: `${cityCode.slice(0, 6)}004`, name: 'Barangay Santa Maria', cityCode },
 ];
 
-// AI Location Analysis Helper
-export interface AILocationAnalysis {
-  overallScore: number;
-  verdict: 'Strong spot' | 'Workable spot' | 'Needs care';
-  footTraffic: 'High' | 'Moderate' | 'Low';
-  competition: 'High' | 'Moderate' | 'Low';
-  demand: 'High' | 'Moderate' | 'Low';
-  recommendation: string;
-}
-
-export const generateAILocationCheck = (
-  businessType: string,
-  locationName: string
-): AILocationAnalysis => {
-  const isFood = businessType.toLowerCase().includes('food') || businessType.toLowerCase().includes('carinderia');
-  const isRetail = businessType.toLowerCase().includes('sari-sari') || businessType.toLowerCase().includes('retail');
-
-  if (isFood) {
-    return {
-      overallScore: 88,
-      verdict: 'Strong spot',
-      footTraffic: 'High',
-      competition: 'Moderate',
-      demand: 'High',
-      recommendation: `This area in ${locationName} has consistent lunch & dinner foot traffic. Highlight fast-service value meals to capture daily commuters.`,
-    };
-  } else if (isRetail) {
-    return {
-      overallScore: 78,
-      verdict: 'Workable spot',
-      footTraffic: 'High',
-      competition: 'High',
-      demand: 'High',
-      recommendation: `${locationName} has high residential density. Consider offering GCash cash-in/cash-out services to stand out from nearby sari-sari stores.`,
-    };
-  } else {
-    return {
-      overallScore: 82,
-      verdict: 'Strong spot',
-      footTraffic: 'Moderate',
-      competition: 'Low',
-      demand: 'Moderate',
-      recommendation: `A solid commercial hub in ${locationName}. Focus on social media local marketing to drive appointment bookings.`,
-    };
-  }
-};
+// Real market/location viability analysis lives in services/marketAnalysis.ts
+// (analyzeMarket) — it pulls actual Google Places competitor/review data and
+// asks Khora AI to reason about it, replacing the static, keyword-only
+// scoring table that used to live here.

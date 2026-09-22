@@ -784,9 +784,15 @@ export const fetchUserNotifications = async (userId: string) => {
 };
 
 // 7. Fetch Suppliers from Supabase Database Filtered by User Location
+//
+// Only 'published' suppliers are shown — 'hidden' rows exist so an admin can
+// unpublish a listing (via the Web Admin Portal) without deleting it. This
+// column only exists after supabase/15_admin_and_market.sql has been run;
+// before that, `status` doesn't exist on the table and this filter would
+// error, so it's paired with that migration's rollout.
 export const fetchSuppliersFromSupabase = async (category?: string, searchQuery?: string, locationFilter?: string) => {
   try {
-    let query = supabase.from('suppliers').select('*');
+    let query = supabase.from('suppliers').select('*').eq('status', 'published');
 
     if (category && category !== 'All' && category !== 'Nearby') {
       query = query.eq('category', category);
@@ -799,9 +805,9 @@ export const fetchSuppliersFromSupabase = async (category?: string, searchQuery?
 
     let { data, error } = await query;
 
-    // Fallback: If strict location/query produced no results, fetch all suppliers
+    // Fallback: If strict location/query produced no results, fetch all published suppliers
     if ((!data || data.length === 0) && locationFilter) {
-      let fallbackQuery = supabase.from('suppliers').select('*');
+      let fallbackQuery = supabase.from('suppliers').select('*').eq('status', 'published');
       if (category && category !== 'All' && category !== 'Nearby') {
         fallbackQuery = fallbackQuery.eq('category', category);
       }
