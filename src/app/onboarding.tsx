@@ -61,6 +61,28 @@ import {
 import { analyzeMarket, saveMarketAnalysis, MarketAnalysisResult } from '@/services/marketAnalysis';
 import { SearchableDropdownModal } from '@/components/ui/SearchableDropdownModal';
 
+// SDG 8.3 accessibility: a first-time entrepreneur may not yet know what
+// these agency acronyms mean, so every permit chip gets a one-line plain-
+// language explanation instead of assuming the term is self-evident.
+// Matched by substring since businessProfiles.ts mixes short codes ('DTI')
+// and fuller labels ("Mayor's / Business Permit") across profiles.
+const PERMIT_PLAIN_TEXT: { match: string; caption: string }[] = [
+  { match: 'barangay', caption: 'A clearance from your local barangay hall — the first, cheapest step.' },
+  { match: 'dti', caption: 'Registers your business name with the Department of Trade and Industry.' },
+  { match: 'sec', caption: 'Registers your company with the Securities and Exchange Commission (for partnerships/corporations).' },
+  { match: 'mayor', caption: "Your city or municipal hall's permit to legally operate at your location." },
+  { match: 'bir', caption: 'Tax registration with the Bureau of Internal Revenue — needed to issue official receipts.' },
+  { match: 'sanitary', caption: 'A health-safety inspection required for food-handling businesses.' },
+  { match: 'health card', caption: 'A personal health clearance for anyone directly handling food.' },
+  { match: 'occupational', caption: "A local government permit for the specific work you'll be doing." },
+];
+
+const getPermitCaption = (permitLabel: string): string => {
+  const lower = permitLabel.toLowerCase();
+  const found = PERMIT_PLAIN_TEXT.find((entry) => lower.includes(entry.match));
+  return found?.caption || 'A requirement for your business type — details are in your roadmap.';
+};
+
 // businessProfiles.ts stays UI-free, so it names an icon and this maps it.
 const PROFILE_ICONS = {
   store: Store,
@@ -1226,9 +1248,12 @@ export default function OnboardingScreen() {
                           onPress={() => setObtainedPermits(toggleArrayItem(obtainedPermits, p))}
                           activeOpacity={0.8}
                         >
-                          <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
-                            {p}
-                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                              {p}
+                            </Text>
+                            <Text style={styles.optionCaption}>{getPermitCaption(p)}</Text>
+                          </View>
                           <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
                             {isSelected && <Check size={12} color="#FFFFFF" strokeWidth={3} />}
                           </View>
