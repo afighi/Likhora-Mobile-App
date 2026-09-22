@@ -1,6 +1,14 @@
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getAuth, 
+import {
+  getAuth,
+  initializeAuth,
+  // Only exists in the React Native build of firebase/auth. Metro resolves
+  // that build at runtime, but TypeScript resolves the browser types, so the
+  // import is valid on device even though the web typings do not list it.
+  // @ts-ignore
+  getReactNativePersistence,
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail, 
@@ -21,7 +29,30 @@ const firebaseConfig = {
 
 // Initialize Firebase App if not already initialized
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+
+/**
+ * On native, Firebase Auth defaults to in-memory persistence — the user is
+ * signed out every time the app is closed. Backing it with AsyncStorage keeps
+ * the session across restarts, which is what people expect from a mobile app.
+ *
+ * The browser already persists to localStorage on its own, so getAuth is
+ * correct there and initializeAuth would be redundant.
+ */
+const createAuth = () => {
+  if (Platform.OS === 'web') return getAuth(app);
+
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // Fast Refresh re-runs this module against an app that already has auth
+    // initialized, which throws. The existing instance is the right one.
+    return getAuth(app);
+  }
+};
+
+export const auth = createAuth();
 
 export const loginWithFirebase = async (email: string, pass: string) => {
   return await signInWithEmailAndPassword(auth, email, pass);
