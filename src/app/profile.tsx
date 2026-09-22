@@ -29,7 +29,8 @@ import {
   RotateCcw,
   Sparkles,
   Lock,
-  X
+  X,
+  Briefcase
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -535,6 +536,19 @@ export default function ProfileScreen() {
                 <Bell size={18} color={LikhoraColors.primary} />
               </View>
               <Text style={styles.menuItemText}>Notifications Center</Text>
+              <ChevronRight size={18} color={LikhoraColors.textPlaceholder} />
+            </TouchableOpacity>
+
+            {/* Business Portfolio (Objective 5) */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => router.push('/business-portfolio')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.menuIconCircle, { backgroundColor: LikhoraColors.secondaryLavender }]}>
+                <Briefcase size={18} color={LikhoraColors.primary} />
+              </View>
+              <Text style={styles.menuItemText}>Business Portfolio</Text>
               <ChevronRight size={18} color={LikhoraColors.textPlaceholder} />
             </TouchableOpacity>
 

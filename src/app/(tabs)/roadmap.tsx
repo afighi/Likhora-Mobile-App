@@ -54,6 +54,7 @@ import {
 } from '@/services/startupTemplates';
 import { notify } from '@/utils/dialog';
 import { askKhoraAI } from '@/services/claude';
+import { getNextStepRecommendation, NextStepRecommendation } from '@/services/nextStepAdvisor';
 
 // Helper to guarantee authentic legal basis, agency, timeline, cost, required docs, and actionable sub-steps for any task
 const ensureSubSteps = (task: RoadmapTask): RoadmapTask => {
@@ -217,6 +218,7 @@ export default function RoadmapTab() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateCategory, setTemplateCategory] = useState<TemplateCategory | null>(null);
+  const [nextStep, setNextStep] = useState<NextStepRecommendation | null>(null);
 
   // Load User Roadmap from Supabase or generate default
   useEffect(() => {
@@ -251,6 +253,30 @@ export default function RoadmapTab() {
 
     loadRoadmap();
   }, [user, userProfile]);
+
+  // Objective 4: contextual "what should I do next" guidance. Re-runs
+  // whenever the completion pattern actually changes (not on every render),
+  // keyed by a cheap signature so completing a task refreshes it without
+  // re-firing on unrelated re-renders.
+  const taskStatusSignature = tasks.map((t) => `${t.id || t.title}:${t.status}`).join('|');
+  useEffect(() => {
+    let cancelled = false;
+    if (tasks.length === 0) {
+      Promise.resolve().then(() => {
+        if (!cancelled) setNextStep(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getNextStepRecommendation(tasks).then((rec) => {
+      if (!cancelled) setNextStep(rec);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the status signature, not the tasks array identity, to avoid refetching on every unrelated re-render
+  }, [taskStatusSignature]);
 
   // Toggle Main Task Completion Status (Updates all sub-steps too)
   const toggleTaskStatus = async (targetTask: RoadmapTask, index?: number) => {
@@ -425,6 +451,43 @@ export default function RoadmapTab() {
         <View style={styles.progressBarTrack}>
           <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
         </View>
+
+        {/* Next Step Card (Objective 4: progress monitoring + AI guidance) */}
+        {nextStep && !nextStep.allComplete && nextStep.task && (
+          <TouchableOpacity
+            style={styles.nextStepCard}
+            activeOpacity={0.85}
+            onPress={() => setSelectedTaskModal(nextStep.task)}
+          >
+            <View style={styles.nextStepIconWrap}>
+              <Sparkles size={16} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nextStepLabel}>Next Step</Text>
+              <Text style={styles.nextStepTitle}>{nextStep.task.title}</Text>
+              <Text style={styles.nextStepReason}>{nextStep.reason}</Text>
+            </View>
+            <ArrowRight size={18} color={LikhoraColors.primary} />
+          </TouchableOpacity>
+        )}
+        {nextStep && nextStep.allComplete && (
+          <TouchableOpacity
+            style={[styles.nextStepCard, styles.nextStepCardDone]}
+            activeOpacity={0.85}
+            onPress={() => router.push('/business-portfolio')}
+          >
+            <View style={[styles.nextStepIconWrap, styles.nextStepIconWrapDone]}>
+              <CheckCircle2 size={16} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nextStepLabel}>All Steps Completed</Text>
+              <Text style={styles.nextStepReason}>
+                Great work! Tap to compile your Business Portfolio from everything you've built.
+              </Text>
+            </View>
+            <ArrowRight size={18} color={LikhoraColors.successGreen} />
+          </TouchableOpacity>
+        )}
 
         <View style={styles.templateActionsRow}>
           <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
@@ -1234,6 +1297,55 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     backgroundColor: LikhoraColors.successGreen,
+  },
+  nextStepCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LikhoraColors.primarySoft,
+    borderRadius: Radius.large,
+    borderWidth: 1,
+    borderColor: LikhoraColors.softPurple,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  nextStepCardDone: {
+    backgroundColor: LikhoraColors.successGreenSoft,
+    borderColor: '#A7F3D0',
+  },
+  nextStepIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: LikhoraColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.two,
+  },
+  nextStepIconWrapDone: {
+    backgroundColor: LikhoraColors.successGreen,
+  },
+  nextStepLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  nextStepTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    marginTop: 2,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  nextStepReason: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    marginTop: 2,
+    lineHeight: 16,
+    fontFamily: LikhoraFont.fontFamily,
   },
   segmentedControlContainer: {
     flexDirection: 'row',

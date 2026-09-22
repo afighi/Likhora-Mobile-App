@@ -725,6 +725,51 @@ export const deleteUserTemplate = async (templateId: string, userId: string) => 
   return { error };
 };
 
+// ----------------------------------------------------
+// Business Portfolio (Objective 5) — a compiled, exportable snapshot of the
+// user's roadmap + costing + suppliers, alongside their chosen AI-generated
+// name/description. Snapshots, not live references, same convention as
+// community_posts.template_data — a portfolio stays stable even if the
+// source roadmap changes afterward.
+// ----------------------------------------------------
+export interface BusinessPortfolio {
+  id: string;
+  user_id: string;
+  business_name: string;
+  business_description: string;
+  ai_name_suggestions: { name: string; tagline: string }[];
+  selected_roadmap_snapshot: RoadmapTask[];
+  selected_costing_snapshot: Product[];
+  selected_suppliers: SupplierItem[];
+  exported_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const fetchBusinessPortfolio = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('business_portfolios')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return { data: data as BusinessPortfolio | null, error };
+};
+
+export const saveBusinessPortfolio = async (
+  portfolio: Omit<BusinessPortfolio, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+) => {
+  const { id, ...rest } = portfolio;
+  const payload = { ...rest, updated_at: new Date().toISOString() };
+
+  const { data, error } = id
+    ? await supabase.from('business_portfolios').update(payload).eq('id', id).select().single()
+    : await supabase.from('business_portfolios').insert(payload).select().single();
+
+  return { data: data as BusinessPortfolio | null, error };
+};
+
 export const fetchCommunityPosts = async () => {
   const { data, error } = await supabase
     .from('community_posts')
