@@ -15,7 +15,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserTemplate, fetchUserTemplates, deleteUserTemplate, replaceUserRoadmap } from '@/services/supabase';
+import {
+  getSavedRoadmaps,
+  saveAllRoadmaps,
+  setActiveRoadmapMeta,
+  UserSavedRoadmap,
+} from '@/services/roadmapStorage';
 
 export default function MyTemplatesScreen() {
   const router = useRouter();
@@ -67,12 +74,42 @@ export default function MyTemplatesScreen() {
     if (!user?.uid) return;
     Alert.alert(
       'Set as your active roadmap?',
-      `This replaces your current roadmap with "${template.name}".`,
+      `This sets "${template.name}" as your active roadmap. Your previous roadmaps will remain safely preserved and accessible in the Templates tab.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Set Active',
           onPress: async () => {
+            const existingRoadmaps = await getSavedRoadmaps();
+            const roadmapId = template.id || `custom-${Date.now()}`;
+            const roadmapTitle = template.name;
+            const existingIdx = existingRoadmaps.findIndex(
+              (r) => r.id === roadmapId || r.title.toLowerCase() === roadmapTitle.toLowerCase()
+            );
+
+            let updatedList: UserSavedRoadmap[];
+            if (existingIdx !== -1) {
+              updatedList = [...existingRoadmaps];
+              updatedList[existingIdx] = {
+                ...updatedList[existingIdx],
+                updatedAt: new Date().toISOString(),
+              };
+            } else {
+              const newSaved: UserSavedRoadmap = {
+                id: roadmapId,
+                title: roadmapTitle,
+                businessType: template.business_type,
+                tasks: template.template_data,
+                updatedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+              };
+              updatedList = [newSaved, ...existingRoadmaps];
+            }
+
+            await saveAllRoadmaps(updatedList);
+            await setActiveRoadmapMeta(roadmapId, roadmapTitle);
+            await AsyncStorage.setItem('@likhora_active_roadmap_tasks', JSON.stringify(template.template_data));
+
             const { error } = await replaceUserRoadmap(user.uid, template.template_data);
             if (error) {
               Alert.alert('Could not update your roadmap', 'Please try again.');

@@ -112,7 +112,7 @@ const GlassTabButton: React.FC<GlassTabButtonProps> = ({
   };
 
   const isAI = route.name === 'ai-assistant';
-  const iconColor = isFocused ? '#FFFFFF' : '#8C8291';
+  const iconColor = isFocused ? '#FFFFFF' : '#6E5D70';
   const iconSize = 20;
 
   const renderIcon = () => {
@@ -124,11 +124,13 @@ const GlassTabButton: React.FC<GlassTabButtonProps> = ({
     }
     if (route.name === 'ai-assistant') {
       return (
-        <Image
-          source={require('../../../assets/images/tabIcons/likhoralogo.png')}
-          resizeMode="contain"
-          style={{ width: 28, height: 28 }}
-        />
+        <View style={styles.centerIconSquircle}>
+          <Image
+            source={require('../../../assets/images/tabIcons/likhoralogo.png')}
+            resizeMode="contain"
+            style={{ width: 24, height: 24 }}
+          />
+        </View>
       );
     }
     if (route.name === 'suppliers') {
@@ -166,7 +168,7 @@ const GlassTabButton: React.FC<GlassTabButtonProps> = ({
 const styles = StyleSheet.create({
   floatingContainer: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 20,
     left: 20,
     right: 20,
     alignItems: 'center',
@@ -175,28 +177,37 @@ const styles = StyleSheet.create({
   } as any,
   glassHolder: {
     width: '100%',
-    height: 66,
-    borderRadius: 38,
-    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(42, 33, 48, 0.08)',
+    height: 64,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(255, 255, 255, 0.78)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: 8,
+    paddingHorizontal: 24,
     elevation: 12,
     ...(Platform.OS === 'web'
       ? ({
-          backdropFilter: 'blur(28px) saturate(200%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(200%)',
-          boxShadow: '0 12px 32px rgba(42, 33, 48, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          boxShadow: '0 12px 32px -4px rgba(30, 19, 32, 0.12)',
         } as any)
       : {
-          shadowColor: LikhoraColors.textPrimary,
-          shadowOffset: { width: 0, height: 12 },
+          shadowColor: '#1E1320',
+          shadowOffset: { width: 0, height: 8 },
           shadowOpacity: 0.12,
           shadowRadius: 24,
         }),
+  },
+  centerIconSquircle: {
+    borderRadius: 14,
+    padding: 6,
+    backgroundColor: 'rgba(246, 243, 247, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0.5,
+    borderColor: 'rgba(66, 20, 62, 0.08)',
   },
   tabItem: {
     paddingVertical: 10,
@@ -212,6 +223,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   tabItemHovered: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(246, 243, 247, 0.8)',
   },
 });

@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     minWidth: 92,
     paddingHorizontal: 16,
     paddingVertical: 11,
-    borderRadius: Radius.pill,
+    borderRadius: Radius.medium,
     alignItems: 'center',
     justifyContent: 'center',
   },

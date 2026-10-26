@@ -10,7 +10,7 @@
  * acceptable for confirming your own signup, never for resetting a password.
  */
 
-import { supabase } from './supabase';
+import { supabase, SUPABASE_ANON_KEY } from './supabase';
 
 export interface ResetResult {
   ok: boolean;
@@ -21,7 +21,12 @@ const FUNCTION_NAME = 'password-reset';
 
 const callFunction = async (body: Record<string, unknown>): Promise<ResetResult> => {
   try {
-    const { data, error } = await supabase.functions.invoke(FUNCTION_NAME, { body });
+    const { data, error } = await supabase.functions.invoke(FUNCTION_NAME, {
+      headers: {
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body,
+    });
 
     if (error) {
       // A non-2xx response arrives as an error with the body attached, and the

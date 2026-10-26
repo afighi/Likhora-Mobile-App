@@ -421,63 +421,363 @@ const PET_GROOMING: StartupTemplate = {
 
 const LAUNDRY: StartupTemplate = {
   id: 'laundry',
-  title: 'Laundry Shop',
+  title: 'Laundry Shop (Wash-Dry-Fold)',
   category: 'Services',
-  budget: '₱50,000 – ₱120,000',
-  desc: 'Wash, dry and fold by the kilo, with optional pickup and delivery.',
+  budget: '₱60,000 – ₱180,000',
+  desc: 'Commercial wash, dry and fold by the kilo, with optional pickup and delivery.',
   accent: '#3E7C7B',
   icon: 'droplets',
   tasks: [
-    ...registrationSteps('ld', 'laundry shop'),
     {
-      title: 'Machines, Water & Power Setup',
-      category: 'Operations',
+      title: 'Commercial Location, Water Pressure & Utility Feasibility',
+      category: 'Planning',
       status: 'Pending',
-      desc: 'The heaviest cost in this business — get the capacity right.',
-      agency: 'Appliance Suppliers & Local Utility',
-      legal_basis: 'PD 856 Sanitation Code (water quality)',
-      estimated_time: '5 - 10 Days',
-      estimated_cost: '₱40,000 - ₱90,000',
-      required_docs: ['Equipment Quotations', 'Electrical Load Assessment'],
+      desc: 'Verify continuous water pressure (30–40 PSI), dedicated 220V/LPG lines, and drainage slope.',
+      agency: 'Local Water Utility & Electric Cooperative',
+      legal_basis: 'PD 856 Sanitation Code of the Philippines & Philippine Electrical Code',
+      estimated_time: '3 - 5 Days',
+      estimated_cost: '₱3,000 - ₱10,000',
+      required_docs: ['Commercial Lease Agreement', 'Water Pressure PSI Test', 'Electrical Load Assessment'],
       sub_steps: [
-        { id: 'ld-eq-1', title: 'Canvass washers and dryers, comparing capacity per load', completed: false },
-        { id: 'ld-eq-2', title: 'Check your electrical load and water pressure can take it', completed: false },
-        { id: 'ld-eq-3', title: 'Arrange proper drainage and waste water disposal', completed: false },
-        { id: 'ld-eq-4', title: 'Stock detergent, fabric softener and laundry bags', completed: false },
+        { id: 'ld-loc-1', title: 'Test location water pressure (minimum 30–40 PSI required) and municipal supply continuity', completed: false },
+        { id: 'ld-loc-2', title: 'Verify dedicated 220V single/three-phase electrical panel for commercial motors and pumps', completed: false },
+        { id: 'ld-loc-3', title: 'Check wastewater drainage slope and install a lint filter basin before municipal discharge', completed: false },
+        { id: 'ld-loc-4', title: 'Negotiate commercial lease near condos, dorms, apartment rows, or subdivisions', completed: false },
       ],
     },
     {
-      title: 'Price Per Kilo & Turnaround',
+      title: 'DTI Business Name Registration',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Registers your laundry shop name nationwide for 5 years.',
+      agency: 'Department of Trade and Industry (DTI BNRS)',
+      legal_basis: 'Act No. 3883 (Philippine Business Name Law)',
+      estimated_time: '30 - 60 Minutes (Online)',
+      estimated_cost: '₱530 (City/Municipal scope + doc stamp)',
+      required_docs: ['1 Valid Government ID', 'DTI BNRS Online Application'],
+      sub_steps: [
+        { id: 'ld-dti-1', title: 'Open the official DTI BNRS portal at bnrs.dti.gov.ph', completed: false },
+        { id: 'ld-dti-2', title: 'Check that your chosen name is still available', completed: false },
+        { id: 'ld-dti-3', title: 'Choose City/Municipal scope and pay via GCash or Maya', completed: false },
+        { id: 'ld-dti-4', title: 'Download and print your official DTI Certificate of Registration', completed: false },
+      ],
+    },
+    {
+      title: 'Commercial Machinery Canvassing & Technician Warranty',
+      category: 'Supplies',
+      status: 'Pending',
+      desc: 'Canvass commercial front-load washers and dryers with local on-site technician maintenance contracts.',
+      agency: 'Commercial Laundry Equipment Suppliers (LG, Speed Queen, Huebsch)',
+      legal_basis: 'RA 7394 Consumer Act of the Philippines (Commercial Warranty)',
+      estimated_time: '4 - 7 Days',
+      estimated_cost: '₱60,000 - ₱180,000',
+      required_docs: ['Equipment Quotations (3 Suppliers)', 'Warranty Contract', 'Maintenance Agreement'],
+      sub_steps: [
+        { id: 'ld-eq-1', title: 'Canvass 3 commercial laundry equipment distributors and compare drum capacity (10.5kg–15kg)', completed: false },
+        { id: 'ld-eq-2', title: 'Prioritize suppliers offering 1–3 year warranty, local on-site servicing, and spare parts', completed: false },
+        { id: 'ld-eq-3', title: 'Compare commercial LPG gas dryers (faster, lower cost) versus high-amperage electric heating', completed: false },
+        { id: 'ld-eq-4', title: 'Schedule professional technician leveling, plumbing hookup, and test cycle calibration', completed: false },
+      ],
+    },
+    {
+      title: 'Barangay Micro-Business Clearance',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Local clearance required before your laundry shop can legally operate.',
+      agency: 'Local Barangay Hall BPLO Desk',
+      legal_basis: 'RA 9178 (BMBE Act) & RA 7160 Local Government Code',
+      estimated_time: '1 - 2 Business Days',
+      estimated_cost: '₱200 - ₱500',
+      required_docs: ['2 Valid Government IDs', 'Cedula', 'Lease Contract / Proof of Address'],
+      sub_steps: [
+        { id: 'ld-brgy-1', title: 'Get the Barangay Business Permit application form at the BPLO desk', completed: false },
+        { id: 'ld-brgy-2', title: 'Present 2 valid IDs, Cedula and notarized commercial lease agreement', completed: false },
+        { id: 'ld-brgy-3', title: 'Pay the clearance fee set by your local ordinance', completed: false },
+        { id: 'ld-brgy-4', title: 'Claim the signed clearance certificate with the official dry seal', completed: false },
+      ],
+    },
+    {
+      title: 'Wash-Dry-Fold Unit Costing & Pricing Architecture',
       category: 'Operations',
       status: 'Pending',
-      desc: 'Work out the cost of one load before setting a per-kilo rate.',
-      agency: 'Self-managed',
-      legal_basis: 'RA 9178 BMBE Financial Compliance',
+      desc: 'Compute cost per load including water, power, and labor to establish profitable per-kilo pricing.',
+      agency: 'Self-managed & Financial Costing',
+      legal_basis: 'RA 9178 BMBE Financial Compliance & RA 7394 Price Tag Law',
       estimated_time: '2 Days',
-      estimated_cost: 'Operating budget',
-      required_docs: ['Rate Sheet'],
+      estimated_cost: 'Operating Budget',
+      required_docs: ['Cost Per Load Worksheet', 'Service Rate Menu Card', 'Claim Stub Ticket Books'],
       sub_steps: [
-        { id: 'ld-rate-1', title: 'Compute cost per load: detergent, water, power and labour', completed: false },
-        { id: 'ld-rate-2', title: 'Use the Smart Calculator to set your per-kilo rate', completed: false },
-        { id: 'ld-rate-3', title: 'Decide your standard turnaround and rush rate', completed: false },
-        { id: 'ld-rate-4', title: 'Set up a claim stub system so nothing gets mixed up', completed: false },
+        { id: 'ld-rate-1', title: 'Calculate total cost per load: detergent (₱8–₱12) + water (₱5–₱8) + gas/power (₱15–₱25) + labor', completed: false },
+        { id: 'ld-rate-2', title: 'Set profitable per-kilo Wash-Dry-Fold rates (₱30–₱40/kilo) with a strict 5kg minimum load charge', completed: false },
+        { id: 'ld-rate-3', title: 'Price specialized services: Heavy comforters (₱150–₱250 flat) and 4-hour rush turnaround (+50%)', completed: false },
+        { id: 'ld-rate-4', title: 'Design numbered duplicate claim stub receipts recording customer name, phone, weight, and count', completed: false },
       ],
     },
     {
-      title: 'Opening & Regular Customers',
+      title: 'Sanitary Clearance & Wastewater Drainage Inspection',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Sanitary clearance ensuring compliant wastewater drainage and plumbing installation.',
+      agency: 'City / Municipal Health Office (Sanitation Section)',
+      legal_basis: 'PD 856 Sanitation Code of the Philippines',
+      estimated_time: '2 - 4 Business Days',
+      estimated_cost: '₱500 - ₱1,500',
+      required_docs: ['Plumbing Layout', 'Lint Trap Verification', 'Sanitary Inspection Application'],
+      sub_steps: [
+        { id: 'ld-san-1', title: 'Submit plumbing and drainage layout to City Health Office Sanitation Section', completed: false },
+        { id: 'ld-san-2', title: 'Undergo on-site sanitary inspection verifying lint traps and drainage connection', completed: false },
+        { id: 'ld-san-3', title: 'Pay sanitary inspection fee at City Treasurer', completed: false },
+        { id: 'ld-san-4', title: 'Claim official Sanitary Clearance Certificate and display in public view', completed: false },
+      ],
+    },
+    {
+      title: "Mayor's Business Permit & Fire Safety",
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'City Hall permit authorising your laundry shop to operate commercially.',
+      agency: 'City / Municipal Hall BPLO & Bureau of Fire Protection',
+      legal_basis: 'RA 7160 Local Government Code (Sec 143/151)',
+      estimated_time: '3 - 7 Business Days',
+      estimated_cost: '₱1,500 - ₱4,000',
+      required_docs: ['DTI Certificate', 'Barangay Clearance', 'BFP Fire Safety Cert', 'Zoning Clearance'],
+      sub_steps: [
+        { id: 'ld-mayor-1', title: 'Submit your DTI certificate and Barangay clearance to the BPLO', completed: false },
+        { id: 'ld-mayor-2', title: 'Pass the BFP fire safety inspection (fire extinguishers and clear exits)', completed: false },
+        { id: 'ld-mayor-3', title: 'Pay permit, garbage and sanitary fees at the City Treasurer', completed: false },
+        { id: 'ld-mayor-4', title: "Claim your Mayor's Permit and business plate", completed: false },
+      ],
+    },
+    {
+      title: 'Garment Tagging, Sorting & Operational SOPs',
+      category: 'Operations',
+      status: 'Pending',
+      desc: 'Enforce garment tag systems to prevent lost clothes, color bleeding, and ensure daily lint filter cleaning.',
+      agency: 'Internal Operations & Quality Control',
+      legal_basis: 'RA 7394 Consumer Act (Service Standard & Due Diligence)',
+      estimated_time: '2 - 3 Days',
+      estimated_cost: '₱1,000 - ₱2,500',
+      required_docs: ['Standard Operating Procedures (SOP) Manual', 'Claim Stub Logbook', 'Daily Checklist'],
+      sub_steps: [
+        { id: 'ld-sop-1', title: 'Implement waterproof tagging: pin color-coded numbered tags onto garment baskets and bags', completed: false },
+        { id: 'ld-sop-2', title: 'Enforce strict sorting: separate white garments from dark colored fabrics and inspect pockets', completed: false },
+        { id: 'ld-sop-3', title: 'Establish mandatory dryer maintenance: clean lint filters after EVERY cycle to prevent fire hazard', completed: false },
+        { id: 'ld-sop-4', title: 'Perform weekly washer drum cleaning cycles with sanitizing solution to prevent musty odors', completed: false },
+      ],
+    },
+    {
+      title: 'BIR Registration & Official Receipts (Form 1901)',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Tax authority registration for issuance of legal Sales Receipts and Cashless POS setup.',
+      agency: 'Bureau of Internal Revenue (Revenue District Office)',
+      legal_basis: 'NIRC Sec 236 & RR 11-2018',
+      estimated_time: '3 - 5 Business Days',
+      estimated_cost: '₱530 ARF + ~₱1,000 receipt printing',
+      required_docs: ['BIR Form 1901', 'DTI Certificate', 'Barangay Clearance', '2 Valid IDs'],
+      sub_steps: [
+        { id: 'ld-bir-1', title: 'File BIR Form 1901 at your assigned BIR Revenue District Office (RDO)', completed: false },
+        { id: 'ld-bir-2', title: 'Pay the Annual Registration Fee and documentary stamp tax', completed: false },
+        { id: 'ld-bir-3', title: 'Register your official books of accounts (General Journal and Ledger)', completed: false },
+        { id: 'ld-bir-4', title: 'Apply for Authority to Print (ATP) official sales receipts and receive BIR Form 2303', completed: false },
+      ],
+    },
+    {
+      title: 'Opening Promo, Neighborhood Loyalty & Pickup/Delivery Setup',
       category: 'Launch',
       status: 'Pending',
-      desc: 'Laundry lives on regulars — win them in the first weeks.',
-      agency: 'Local Community',
-      legal_basis: 'RA 7394 Consumer Act (posted rates)',
-      estimated_time: '2 Days',
-      estimated_cost: '₱1,500 - ₱3,000',
-      required_docs: ['Rate Board', 'Claim Stubs'],
+      desc: 'Launch a 10th-wash free loyalty program, distribute opening promo flyers, and setup neighborhood pickup.',
+      agency: 'Local Community & Barangay Promotion',
+      legal_basis: 'RA 7394 Consumer Act of the Philippines',
+      estimated_time: '2 - 3 Days',
+      estimated_cost: '₱1,500 - ₱4,000',
+      required_docs: ['Weatherproof Rate Board', 'Loyalty Punch Cards', 'Opening Promo Flyers'],
       sub_steps: [
-        { id: 'ld-open-1', title: 'Post your rates, turnaround time and cut-off clearly', completed: false },
-        { id: 'ld-open-2', title: 'Offer a discount on the first load for new customers', completed: false },
-        { id: 'ld-open-3', title: 'Introduce yourself to nearby dorms, condos and offices', completed: false },
-        { id: 'ld-open-4', title: 'Start a loyalty card for every 10th kilo free', completed: false },
+        { id: 'ld-open-1', title: 'Mount a prominent weatherproof rate board at storefront detailing per-kilo rates and cut-off hours', completed: false },
+        { id: 'ld-open-2', title: 'Distribute opening promo flyers (20% off first 50 wash loads or free premium downy upgrade)', completed: false },
+        { id: 'ld-open-3', title: 'Launch a "10th Wash Free" loyalty punch card to incentivize weekly repeat household customers', completed: false },
+        { id: 'ld-open-4', title: 'Partner with local tricycle drivers or delivery riders for scheduled neighborhood pickup and drop-off', completed: false },
+      ],
+    },
+  ],
+};
+
+const WATER_STATION_TEMPLATE: StartupTemplate = {
+  id: 'water-station',
+  title: 'Water Refilling Station',
+  category: 'Services',
+  budget: '₱120,000 – ₱280,000',
+  desc: 'Purified, alkaline & mineral water refill and delivery station.',
+  accent: '#2B7A78',
+  icon: 'droplets',
+  tasks: [
+    {
+      title: 'Water Source Viability & DOH Potability Laboratory Testing',
+      category: 'Planning',
+      status: 'Pending',
+      desc: 'Collect raw feed water samples and secure mandatory PNSDW laboratory clearances.',
+      agency: 'Local Water District & DOH-Accredited Water Laboratory',
+      legal_basis: 'Philippine National Standards for Drinking Water (PNSDW AO 2017-0010) & PD 856',
+      estimated_time: '5 - 10 Days',
+      estimated_cost: '₱3,500 - ₱7,000',
+      required_docs: ['Raw Water Potability Certificate', 'Bacteriological Water Analysis', 'Physical-Chemical Test Report'],
+      sub_steps: [
+        { id: 'ws-pot-1', title: 'Collect raw feed water sample and submit to a DOH-accredited laboratory for PNSDW potability testing', completed: false },
+        { id: 'ws-pot-2', title: 'Verify continuous water pressure and daily volume from municipal water district or commercial deep well', completed: false },
+        { id: 'ws-pot-3', title: 'Ensure test covers microbiological (coliform/E. coli) and physical-chemical (turbidity/pH) parameters', completed: false },
+        { id: 'ws-pot-4', title: 'Design a cleanroom partition separating the refilling room from customer waiting areas', completed: false },
+      ],
+    },
+    {
+      title: 'DTI Business Name Registration',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Registers your water refilling station name nationwide for 5 years.',
+      agency: 'Department of Trade and Industry (DTI BNRS)',
+      legal_basis: 'Act No. 3883 (Philippine Business Name Law)',
+      estimated_time: '30 - 60 Minutes (Online)',
+      estimated_cost: '₱530 (City/Municipal scope + doc stamp)',
+      required_docs: ['1 Valid Government ID', 'DTI BNRS Online Application'],
+      sub_steps: [
+        { id: 'ws-dti-1', title: 'Open the official DTI BNRS portal at bnrs.dti.gov.ph', completed: false },
+        { id: 'ws-dti-2', title: 'Check that your chosen station name is available', completed: false },
+        { id: 'ws-dti-3', title: 'Choose City/Municipal scope and pay via GCash or Maya', completed: false },
+        { id: 'ws-dti-4', title: 'Download and print your official DTI Certificate of Registration', completed: false },
+      ],
+    },
+    {
+      title: 'Commercial RO / Alkaline Machinery Canvassing & Installation',
+      category: 'Supplies',
+      status: 'Pending',
+      desc: 'Canvass multi-stage Reverse Osmosis and Alkaline filtration systems with UV sterilizers.',
+      agency: 'Commercial Water Equipment Manufacturers & Installers',
+      legal_basis: 'RA 9178 BMBE Financial Compliance & DOH AO 2017-0010',
+      estimated_time: '7 - 14 Days',
+      estimated_cost: '₱120,000 - ₱280,000',
+      required_docs: ['Equipment Purchase Agreement', 'Filtration Schematic Blueprint', 'Commissioning Test Report'],
+      sub_steps: [
+        { id: 'ws-eq-1', title: 'Canvass at least 3 reputable water filtration equipment suppliers and compare RO/Alkaline packages', completed: false },
+        { id: 'ws-eq-2', title: 'Inspect system components: sediment filters, carbon blocks, RO membranes, and UV sterilizers', completed: false },
+        { id: 'ws-eq-3', title: 'Install food-grade 304 stainless steel product water storage tanks (500L–1000L) with breather filters', completed: false },
+        { id: 'ws-eq-4', title: 'Conduct equipment commissioning: test automatic booster pumps and digital TDS monitors', completed: false },
+      ],
+    },
+    {
+      title: 'Barangay Micro-Business Clearance',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Local clearance required before your water station can legally operate.',
+      agency: 'Local Barangay Hall BPLO Desk',
+      legal_basis: 'RA 9178 (BMBE Act) & RA 7160 Local Government Code',
+      estimated_time: '1 - 2 Business Days',
+      estimated_cost: '₱200 - ₱500',
+      required_docs: ['2 Valid Government IDs', 'Cedula', 'Lease Contract / Proof of Address'],
+      sub_steps: [
+        { id: 'ws-brgy-1', title: 'Request Barangay Business Permit Application Form at Barangay BPLO Desk', completed: false },
+        { id: 'ws-brgy-2', title: 'Present 2 Valid Government IDs, Cedula & Lease Contract / Homeowner Consent', completed: false },
+        { id: 'ws-brgy-3', title: 'Pay Barangay Clearance Fee (₱200 - ₱500 based on LGU Ordinance)', completed: false },
+        { id: 'ws-brgy-4', title: 'Collect signed Barangay Micro-Business Clearance Certificate with official dry seal', completed: false },
+      ],
+    },
+    {
+      title: 'Cost per Gallon & Subscription Refill Pricing Architecture',
+      category: 'Operations',
+      status: 'Pending',
+      desc: 'Calculate exact cost per 5-gallon bottle and formulate attractive walk-in and delivery subscription rates.',
+      agency: 'Self-managed & Financial Costing',
+      legal_basis: 'RA 9178 BMBE Financial Compliance & RA 7394 Price Tag Law',
+      estimated_time: '2 Days',
+      estimated_cost: 'Operating Budget',
+      required_docs: ['Cost Per Bottle Worksheet', 'Station Price Board', 'Subscription Delivery Log'],
+      sub_steps: [
+        { id: 'ws-cost-1', title: 'Compute cost per 5-gallon refill: raw water (₱1.50) + power (₱2.00) + cap/seal (₱2.50) + filter amortization', completed: false },
+        { id: 'ws-cost-2', title: 'Set competitive prices: walk-in refill (₱25–₱35), delivered refill (₱35–₱50), and bottle deposit', completed: false },
+        { id: 'ws-cost-3', title: 'Formulate weekly subscription plans: free water dispenser loan for 6-month contracts with 4 bottles/week', completed: false },
+        { id: 'ws-cost-4', title: 'Provide cashless payment convenience (GCash / Maya QR) and issue numbered delivery receipt slips', completed: false },
+      ],
+    },
+    {
+      title: 'DOH Sanitary Permit & Health Cards (PD 856)',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'City Health sanitary permit certifying compliant cleanroom refilling operations.',
+      agency: 'City / Municipal Health Office',
+      legal_basis: 'PD 856 Sanitation Code of the Philippines',
+      estimated_time: '3 - 5 Business Days',
+      estimated_cost: '₱1,000 - ₱2,500',
+      required_docs: ['Water Laboratory Clearance', 'Food Handler Health Cards', 'Floor Plan with Cleanroom'],
+      sub_steps: [
+        { id: 'ws-san-1', title: 'Submit PNSDW laboratory water potability test results to City Health Office', completed: false },
+        { id: 'ws-san-2', title: 'Ensure all refilling station staff secure pink health cards (stool & X-ray tests)', completed: false },
+        { id: 'ws-san-3', title: 'Pass on-site sanitary inspection of bottle washing and refilling cleanroom', completed: false },
+        { id: 'ws-san-4', title: 'Claim official Sanitary Permit and display in customer waiting area', completed: false },
+      ],
+    },
+    {
+      title: "Mayor's Business Permit & Fire Safety",
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'City Hall commercial license permitting commercial water distribution.',
+      agency: 'City / Municipal Hall BPLO & Bureau of Fire Protection',
+      legal_basis: 'RA 7160 Local Government Code (Sec 143/151)',
+      estimated_time: '3 - 7 Business Days',
+      estimated_cost: '₱1,500 - ₱4,000',
+      required_docs: ['DTI Certificate', 'Barangay Clearance', 'Sanitary Permit', 'BFP Fire Safety Cert'],
+      sub_steps: [
+        { id: 'ws-mayor-1', title: 'Submit DTI certificate, Barangay clearance, and Sanitary Permit to City BPLO', completed: false },
+        { id: 'ws-mayor-2', title: 'Pass BFP fire safety inspection (fire extinguishers and electrical wiring clearance)', completed: false },
+        { id: 'ws-mayor-3', title: 'Pay local business tax and regulatory fees at City Treasurer', completed: false },
+        { id: 'ws-mayor-4', title: "Claim official Mayor's Business Permit and official business plate", completed: false },
+      ],
+    },
+    {
+      title: '5-Gallon Bottles, Caps & Bottle Sanitization SOPs',
+      category: 'Operations',
+      status: 'Pending',
+      desc: 'Procure 5-gallon containers, non-spill caps, heat seals, and enforce 3-stage washing SOPs.',
+      agency: 'Packaging Wholesalers & Internal Quality Control',
+      legal_basis: 'PD 856 Sanitation Code & RA 7394 Consumer Act',
+      estimated_time: '3 - 5 Days',
+      estimated_cost: '₱15,000 - ₱35,000',
+      required_docs: ['Container Inventory Log', 'Sanitizing Bath Log', 'Custom Vinyl Label Design'],
+      sub_steps: [
+        { id: 'ws-bot-1', title: 'Order initial stock of 100–200 food-grade 5-gallon containers (round dispenser and slim faucet types)', completed: false },
+        { id: 'ws-bot-2', title: 'Source sanitary non-spill caps, tamper-proof heat-shrink neck seals, and heat gun', completed: false },
+        { id: 'ws-bot-3', title: 'Implement 3-stage bottle sanitizing: pressure wash, disinfectant soak, and product water flush', completed: false },
+        { id: 'ws-bot-4', title: 'Print custom waterproof vinyl labels with station name, DTI/Mayor permit details, and hotline', completed: false },
+      ],
+    },
+    {
+      title: 'BIR Registration & Official Receipts (Form 1901)',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'National tax registration for issuance of legal Sales Invoices.',
+      agency: 'Bureau of Internal Revenue (Revenue District Office)',
+      legal_basis: 'NIRC Sec 236 & RR 11-2018',
+      estimated_time: '3 - 5 Business Days',
+      estimated_cost: '₱530 ARF + ~₱1,000 receipt printing',
+      required_docs: ['BIR Form 1901', 'DTI Certificate', 'Mayor Permit', '2 Valid IDs'],
+      sub_steps: [
+        { id: 'ws-bir-1', title: 'File BIR Form 1901 at your assigned BIR Revenue District Office (RDO)', completed: false },
+        { id: 'ws-bir-2', title: 'Pay the Annual Registration Fee and documentary stamp tax', completed: false },
+        { id: 'ws-bir-3', title: 'Register your official books of accounts (General Journal and Ledger)', completed: false },
+        { id: 'ws-bir-4', title: 'Apply for Authority to Print (ATP) official sales receipts and receive BIR Form 2303', completed: false },
+      ],
+    },
+    {
+      title: 'Daily TDS Calibration, Route Delivery & Subscription Launch',
+      category: 'Launch',
+      status: 'Pending',
+      desc: 'Calibrate daily TDS readings, launch neighborhood opening promos, and schedule delivery routes.',
+      agency: 'City Health Office (Sanitation Section) & Local Community',
+      legal_basis: 'PD 856 Sanitation Code & PNSDW Standards',
+      estimated_time: '2 - 3 Days',
+      estimated_cost: '₱1,500 - ₱3,500',
+      required_docs: ['Daily TDS Logbook', 'Station Price Board', 'Neighborhood Route Map'],
+      sub_steps: [
+        { id: 'ws-open-1', title: 'Calibrate handheld digital TDS meter every morning (target <10 ppm for purified RO) and log readings', completed: false },
+        { id: 'ws-open-2', title: 'Distribute "Free 1st 5-Gallon Refill" opening flyers to households in your target subdivisions', completed: false },
+        { id: 'ws-open-3', title: 'Equip delivery motorcycle/trike with custom welded racks carrying 8–16 containers safely', completed: false },
+        { id: 'ws-open-4', title: 'Schedule fixed morning and afternoon delivery routes for local restaurants, offices, and homes', completed: false },
       ],
     },
   ],
@@ -676,12 +976,95 @@ const SECONDHAND: StartupTemplate = {
   ],
 };
 
+const PHARMACY_TEMPLATE: StartupTemplate = {
+  id: 'pharmacy-store',
+  title: 'Community Drugstore / Botika',
+  category: 'Retail',
+  budget: '₱150,000 – ₱350,000',
+  desc: 'Neighborhood community pharmacy dispensing affordable generic and branded medicines, vitamins, and healthcare supplies under FDA & RA 10918 compliance.',
+  accent: '#5BB381',
+  icon: 'store',
+  tasks: [
+    ...registrationSteps('pharm', 'Community Pharmacy', { sanitary: true }),
+    {
+      title: 'PRC Pharmacist Contract & Cold-Chain Storage',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'Mandatory supervising pharmacist credentials and calibrated pharmaceutical cold-chain refrigeration.',
+      agency: 'Professional Regulation Commission (PRC) & FDA',
+      legal_basis: 'RA 10918 (Philippine Pharmacy Act) & RA 9711',
+      estimated_time: '3 - 7 Business Days',
+      estimated_cost: '₱15,000 - ₱30,000 (retainer / equipment)',
+      required_docs: ['PRC Pharmacist ID & Board Certificate', 'Pharmacist-Owner Agreement', 'Refrigerator Calibration Logbook', 'Philippine National Drug Formulary (PNDF)'],
+      sub_steps: [
+        { id: 'pharm-rph-1', title: 'Contract a licensed PRC Pharmacist and notarize official employment agreement', completed: false },
+        { id: 'pharm-rph-2', title: 'Equip store with dedicated pharmaceutical refrigerator (2°C–8°C) and digital thermometer', completed: false },
+        { id: 'pharm-rph-3', title: 'Acquire official FDA prescription book, senior citizen sales book, and latest PNDF formulary', completed: false },
+        { id: 'pharm-rph-4', title: 'Install partitioned dispensing counter separating prescription stock from public area', completed: false },
+      ],
+    },
+    {
+      title: 'FDA License to Operate (LTO) via eServices',
+      category: 'Permits',
+      status: 'Pending',
+      desc: 'National regulatory permit from the Food and Drug Administration authorizing retail medicine sales.',
+      agency: 'Food and Drug Administration (FDA Philippines eServices)',
+      legal_basis: 'RA 9711 (FDA Act of 2009) & DOH AO 2020-0017',
+      estimated_time: '15 - 30 Business Days',
+      estimated_cost: '₱2,000 - ₱5,000',
+      required_docs: ['FDA eServices Application', 'Pharmacist Board Certificate', 'Store Vicinity & Floor Plan Map', 'Proof of Temperature Monitoring'],
+      sub_steps: [
+        { id: 'pharm-fda-1', title: 'Create account on FDA eServices portal (eservices.fda.gov.ph)', completed: false },
+        { id: 'pharm-fda-2', title: 'Upload location floor plan, pharmacist credentials, and municipal business permit', completed: false },
+        { id: 'pharm-fda-3', title: 'Pay official FDA inspection and filing fees through Landbank or BancNet', completed: false },
+        { id: 'pharm-fda-4', title: 'Pass post-approval FDA regulatory inspection and display framed LTO certificate', completed: false },
+      ],
+    },
+    {
+      title: 'Canvass Wholesale Pharmaceutical Distributors',
+      category: 'Supplies',
+      status: 'Pending',
+      desc: 'Open accounts with FDA-licensed medicine distributors and canvass high-demand generic lines.',
+      agency: 'Licensed Drug Wholesalers & Distributors (Zuellig, Metro Drug, Unilab, RiteMed)',
+      legal_basis: 'RA 9178 BMBE Financial Compliance & RA 6675 Generics Act',
+      estimated_time: '5 - 10 Business Days',
+      estimated_cost: 'Initial Stocking Budget (₱80k - ₱200k)',
+      required_docs: ['FDA LTO Copy', 'BIR 2303 Certificate', 'Mayor Permit', 'Distributor Credit Application'],
+      sub_steps: [
+        { id: 'pharm-sup-1', title: 'Submit LTO credentials to 3 major pharmaceutical distributors for wholesale terms', completed: false },
+        { id: 'pharm-sup-2', title: 'Stock fast-moving OTC generics (Paracetamol, Amoxicillin, Losartan, Mefenamic Acid)', completed: false },
+        { id: 'pharm-sup-3', title: 'Establish First-Expired, First-Out (FEFO) shelf organization system with batch logs', completed: false },
+        { id: 'pharm-sup-4', title: 'Set up POS or ledger system tracking expiration dates 6 months in advance', completed: false },
+      ],
+    },
+    {
+      title: 'Opening Day, Price Tag Law & Senior/PWD Compliance',
+      category: 'Launch',
+      status: 'Pending',
+      desc: 'Launch with clearly posted generic price list and statutory senior/PWD discount protocol.',
+      agency: 'DTI Fair Trade Bureau & Local Community',
+      legal_basis: 'RA 7394 (Price Tag Law) & RA 9994 (Senior Citizens) & RA 10754 (PWD)',
+      estimated_time: '2 - 3 Days',
+      estimated_cost: '₱1,500 - ₱3,500',
+      required_docs: ['Generic Equivalents Menu Board', 'Senior/PWD Record Book', 'Posted LTO & BIR 2303'],
+      sub_steps: [
+        { id: 'pharm-open-1', title: 'Display mandatory Generics Menu Board comparing brand names and generic prices', completed: false },
+        { id: 'pharm-open-2', title: 'Brief staff on verifying SC/PWD booklets for 20% discount and 12% VAT exemption', completed: false },
+        { id: 'pharm-open-3', title: 'Offer free neighborhood blood pressure checks to welcome community walk-ins', completed: false },
+        { id: 'pharm-open-4', title: 'Set up cashless payments (GCash/Maya) at the dispensing counter', completed: false },
+      ],
+    },
+  ],
+};
+
 export const STARTUP_TEMPLATES: StartupTemplate[] = [
   MILK_TEA,
   SARI_SARI,
   CARINDERIA,
+  PHARMACY_TEMPLATE,
   PET_GROOMING,
   LAUNDRY,
+  WATER_STATION_TEMPLATE,
   ONLINE_SHOP,
   UKAY,
   SECONDHAND,
@@ -716,4 +1099,44 @@ export const filterTemplates = (
       template.tasks.some((task) => task.title.toLowerCase().includes(query))
     );
   });
+};
+
+/**
+ * Matches an onboarding business type selection to one of our pre-built
+ * Philippine startup roadmap templates, so onboarding doesn't fall back to
+ * generic steps when a rich pre-built template exists.
+ */
+export const getStartupTemplateForBusinessType = (businessType: string): StartupTemplate | undefined => {
+  const norm = (businessType || '').toLowerCase();
+  if (norm.includes('carinderia') || norm.includes('food stall') || norm.includes('lutong bahay') || norm.includes('eatery')) {
+    return CARINDERIA;
+  }
+  if (norm.includes('sari-sari') || norm.includes('sari sari') || norm.includes('retail') || norm.includes('grocery')) {
+    return SARI_SARI;
+  }
+  if (norm.includes('milk tea') || norm.includes('beverage') || norm.includes('coffee') || norm.includes('cafe')) {
+    return MILK_TEA;
+  }
+  if (norm.includes('online') || norm.includes('shopee') || norm.includes('lazada') || norm.includes('tiktok')) {
+    return ONLINE_SHOP;
+  }
+  if (norm.includes('ukay') || norm.includes('clothing') || norm.includes('boutique') || norm.includes('apparel')) {
+    return UKAY;
+  }
+  if (norm.includes('secondhand') || norm.includes('resell') || norm.includes('surplus') || norm.includes('buy & sell')) {
+    return SECONDHAND;
+  }
+  if (norm.includes('pet') || norm.includes('grooming')) {
+    return PET_GROOMING;
+  }
+  if (norm.includes('laundry')) {
+    return LAUNDRY;
+  }
+  if (norm.includes('water') || norm.includes('refill') || norm.includes('tubig') || norm.includes('purified')) {
+    return WATER_STATION_TEMPLATE;
+  }
+  if (norm.includes('pharmacy') || norm.includes('botika') || norm.includes('drug') || norm.includes('gamot') || norm.includes('medicine')) {
+    return PHARMACY_TEMPLATE;
+  }
+  return undefined;
 };

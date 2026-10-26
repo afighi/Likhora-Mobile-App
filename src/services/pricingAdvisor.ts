@@ -64,8 +64,11 @@ const buildPrompt = (req: PriceSuggestionRequest): string => {
     'PRODUCT',
     `- Name: ${req.productName}`,
     `- How it is bought: ${MODE_LABELS[req.purchaseMode]}`,
-    `- Cost to acquire per piece (puhunan): PHP ${req.cost.puhunan.toFixed(2)}`,
-    `- Extra cost per piece (dagdag gastos: ice, plastic, kuryente, pamasahe): PHP ${req.cost.dagdagGastosPerPiece.toFixed(2)}`,
+    `- Material cost per piece: PHP ${(req.cost.materialCostPerPiece ?? req.cost.puhunan).toFixed(2)}`,
+    req.cost.laborCostPerPiece > 0
+      ? `- Labor cost per piece: PHP ${req.cost.laborCostPerPiece.toFixed(2)}`
+      : '',
+    `- Overhead / Dagdag-gastos per piece: PHP ${req.cost.dagdagGastosPerPiece.toFixed(2)}`,
     `- TOTAL cost per piece: PHP ${req.cost.totalCostPerPiece.toFixed(2)}`,
     req.cost.batchPieces > 0
       ? `- Batch: ${req.cost.batchPieces} pieces, PHP ${req.cost.batchTotalInvestment.toFixed(2)} total capital`

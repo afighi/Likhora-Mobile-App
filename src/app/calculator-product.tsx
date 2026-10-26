@@ -26,6 +26,8 @@ import {
   ChevronUp,
   AlertTriangle,
   Trash2,
+  Clock,
+  Users,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -51,7 +53,12 @@ import {
   priceStep,
   EXTRA_COST_EXAMPLES,
   resolveCategory,
+  RegionalWagePreset,
+  PHILIPPINE_REGIONAL_WAGES,
+  calculateBatchLabor,
+  suggestRegionalWage,
 } from '@/services/calculator';
+import { getSavedRoadmaps, UserSavedRoadmap } from '@/services/roadmapStorage';
 import { PriceSuggestion, suggestPrice } from '@/services/pricingAdvisor';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { notify } from '@/utils/dialog';
@@ -62,6 +69,21 @@ const peso = (n: number) =>
 const parseNum = (s: string): number => {
   const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
+};
+
+// Clean string so it strictly accepts numbers only (digits + single dot)
+const sanitizeDecimal = (text: string): string => {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const parts = cleaned.split('.');
+  if (parts.length > 2) {
+    cleaned = parts[0] + '.' + parts.slice(1).join('');
+  }
+  return cleaned;
+};
+
+// Clean string so it strictly accepts whole integer numbers only (digits only)
+const sanitizeInteger = (text: string): string => {
+  return text.replace(/[^0-9]/g, '');
 };
 
 const PURCHASE_MODES: { id: PurchaseMode; label: string; caption: string }[] = [
@@ -91,8 +113,9 @@ const buildSignature = (
   mode: PurchaseMode,
   totalCostPerPiece: number,
   batchPieces: number,
-  dailyUnits: number
-) => `${productName.trim().toLowerCase()}|${mode}|${totalCostPerPiece}|${batchPieces}|${dailyUnits}`;
+  dailyUnits: number,
+  laborCost: number = 0
+) => `${productName.trim().toLowerCase()}|${mode}|${totalCostPerPiece}|${batchPieces}|${dailyUnits}|${laborCost}`;
 
 export default function CalculatorProductScreen() {
   const router = useRouter();
@@ -111,6 +134,7 @@ export default function CalculatorProductScreen() {
   // ---- Step 1: what is it, and which business roadmap it belongs to ----
   const [name, setName] = useState('');
   const [templates, setTemplates] = useState<UserTemplate[]>([]);
+  const [savedRoadmaps, setSavedRoadmaps] = useState<UserSavedRoadmap[]>([]);
   // Categories this user already has, so a new product joins one rather than
   // spawning a near-duplicate chip in the filter bar.
   const [existingCategories, setExistingCategories] = useState<string[]>([]);
@@ -131,8 +155,20 @@ export default function CalculatorProductScreen() {
   // Someone selling 250-gram packs thinks in grams, not 0.25 kilos. The unit
   // is a display choice; the math below always works in the base unit.
   const [portionUnit, setPortionUnit] = useState<PortionUnit>('kg');
+  const [laborCostPerBatch, setLaborCostPerBatch] = useState('');
   const [dagdagGastosPerPiece, setDagdagGastosPerPiece] = useState('');
   const [estimatedDailyUnitsSold, setEstimatedDailyUnitsSold] = useState('');
+
+  // DOLE Regional Minimum Wage & Labor Assistant
+  const [showLaborAssistant, setShowLaborAssistant] = useState(false);
+  const [selectedWagePreset, setSelectedWagePreset] = useState<RegionalWagePreset>(() =>
+    suggestRegionalWage(userProfile?.location)
+  );
+  const [isCustomHourlyRate, setIsCustomHourlyRate] = useState(false);
+  const [customHourlyRate, setCustomHourlyRate] = useState('');
+  const [laborHours, setLaborHours] = useState('1');
+  const [laborWorkers, setLaborWorkers] = useState(1);
+  const [assistantAppliedNotice, setAssistantAppliedNotice] = useState(false);
 
   // ---- Step 3: Khora's price ----
   const [thinking, setThinking] = useState(false);
@@ -143,10 +179,10 @@ export default function CalculatorProductScreen() {
   const [showMath, setShowMath] = useState(false);
 
   // Every product is filed under one business roadmap: the user's live
-  // roadmap, or any roadmap saved in their template library. Someone running
+  // roadmap, or any roadmap saved in their template/saved roadmaps library. Someone running
   // two ventures gets a separate price book for each.
-  const businessOptions = useMemo(
-    () => [
+  const businessOptions = useMemo(() => {
+    const options: { key: string; label: string; meta: string }[] = [
       {
         key: 'active',
         // Show the user's actual business, not a generic label — falling back
@@ -156,14 +192,49 @@ export default function CalculatorProductScreen() {
           ? `${userProfile.business_type} · Active roadmap`
           : 'Active roadmap',
       },
-      ...templates.map((template) => ({
-        key: template.id,
-        label: template.name,
-        meta: template.business_type ? `${template.business_type} · Saved template` : 'Saved template',
-      })),
-    ],
-    [templates, userProfile?.business_name, userProfile?.business_type]
-  );
+    ];
+
+    const seenKeys = new Set<string>(['active']);
+
+    savedRoadmaps.forEach((roadmap) => {
+      if (!seenKeys.has(roadmap.id)) {
+        seenKeys.add(roadmap.id);
+        options.push({
+          key: roadmap.id,
+          label: roadmap.title,
+          meta: roadmap.businessType ? `${roadmap.businessType} · Saved roadmap` : 'Saved roadmap',
+        });
+      }
+    });
+
+    templates.forEach((template) => {
+      if (!seenKeys.has(template.id)) {
+        seenKeys.add(template.id);
+        options.push({
+          key: template.id,
+          label: template.name,
+          meta: template.business_type ? `${template.business_type} · Saved template` : 'Saved template',
+        });
+      }
+    });
+
+    return options;
+  }, [templates, savedRoadmaps, userProfile?.business_name, userProfile?.business_type]);
+
+  const effectiveHourlyRate = isCustomHourlyRate
+    ? parseNum(customHourlyRate)
+    : selectedWagePreset.hourlyRate;
+
+  const assistantComputedLabor = useMemo(() => {
+    const hours = parseNum(laborHours);
+    return calculateBatchLabor(effectiveHourlyRate, hours, laborWorkers);
+  }, [effectiveHourlyRate, laborHours, laborWorkers]);
+
+  const handleApplyLabor = () => {
+    setLaborCostPerBatch(assistantComputedLabor > 0 ? String(assistantComputedLabor) : '');
+    setAssistantAppliedNotice(true);
+    setTimeout(() => setAssistantAppliedNotice(false), 2500);
+  };
 
   // With only one roadmap to choose from there is nothing to decide, so it
   // selects itself. Derived rather than stored, so no effect has to write it.
@@ -182,6 +253,7 @@ export default function CalculatorProductScreen() {
         bulkQuantity: parseNum(bulkQuantity),
         bulkTotalPrice: parseNum(bulkTotalPrice),
         bulkPortionSize: toBaseUnit(parseNum(bulkPortionSize), portionUnit),
+        laborCostPerBatch: parseNum(laborCostPerBatch),
         dagdagGastosPerPiece: parseNum(dagdagGastosPerPiece),
       }),
     [
@@ -194,6 +266,7 @@ export default function CalculatorProductScreen() {
       bulkTotalPrice,
       bulkPortionSize,
       portionUnit,
+      laborCostPerBatch,
       dagdagGastosPerPiece,
     ]
   );
@@ -234,21 +307,24 @@ export default function CalculatorProductScreen() {
     purchaseMode,
     cost.totalCostPerPiece,
     cost.batchPieces,
-    parseNum(estimatedDailyUnitsSold)
+    parseNum(estimatedDailyUnitsSold),
+    parseNum(laborCostPerBatch)
   );
 
   useEffect(() => {
     const load = async () => {
       if (!user?.uid) return;
 
-      const [templateResult, categoryResult, productResult] = await Promise.all([
+      const [templateResult, categoryResult, productResult, savedRoadmapsList] = await Promise.all([
         fetchUserTemplates(user.uid),
         fetchUserProductCategories(user.uid),
         id ? fetchProductById(id, user.uid) : Promise.resolve({ data: null, error: null }),
+        getSavedRoadmaps(),
       ]);
 
       setTemplates(templateResult.data || []);
       setExistingCategories(categoryResult.data || []);
+      setSavedRoadmaps(savedRoadmapsList || []);
 
       const existing = productResult.data as Product | null;
       if (existing) {
@@ -256,7 +332,13 @@ export default function CalculatorProductScreen() {
         setBusinessKey(existing.business_key || null);
         setImageUri(existing.image_url || null);
         setPurchaseMode(existing.purchase_mode);
-        setManualCostPerPiece(existing.manual_cost_per_piece != null ? String(existing.manual_cost_per_piece) : '');
+        setManualCostPerPiece(
+          existing.manual_cost_per_piece != null
+            ? String(existing.manual_cost_per_piece)
+            : existing.material_cost != null
+              ? String(existing.material_cost)
+              : ''
+        );
         setBatchPieces(existing.batch_pieces != null ? String(existing.batch_pieces) : '');
         setPackTotalPrice(existing.pack_total_price != null ? String(existing.pack_total_price) : '');
         setPackItemCount(existing.pack_item_count != null ? String(existing.pack_item_count) : '');
@@ -269,6 +351,7 @@ export default function CalculatorProductScreen() {
             ? String(fromBaseUnit(existing.bulk_portion_size, savedUnit))
             : ''
         );
+        setLaborCostPerBatch(existing.labor_cost_per_batch != null ? String(existing.labor_cost_per_batch) : '');
         setDagdagGastosPerPiece(existing.dagdag_gastos_per_piece ? String(existing.dagdag_gastos_per_piece) : '');
         setEstimatedDailyUnitsSold(
           existing.estimated_daily_units_sold != null ? String(existing.estimated_daily_units_sold) : ''
@@ -294,12 +377,13 @@ export default function CalculatorProductScreen() {
           // of spending another AI call on the same inputs.
           const savedCost = computeCost({
             purchaseMode: existing.purchase_mode,
-            manualCostPerPiece: existing.manual_cost_per_piece || 0,
+            manualCostPerPiece: existing.manual_cost_per_piece || existing.material_cost || 0,
             batchPieces: existing.batch_pieces || 0,
             packTotalPrice: existing.pack_total_price || 0,
             packItemCount: existing.pack_item_count || 0,
             bulkTotalPrice: existing.bulk_total_price || 0,
             bulkPortionSize: existing.bulk_portion_size || 0,
+            laborCostPerBatch: existing.labor_cost_per_batch || 0,
             dagdagGastosPerPiece: existing.dagdag_gastos_per_piece || 0,
           });
           setSuggestionFor(
@@ -308,7 +392,8 @@ export default function CalculatorProductScreen() {
               existing.purchase_mode,
               savedCost.totalCostPerPiece,
               savedCost.batchPieces,
-              existing.estimated_daily_units_sold || 0
+              existing.estimated_daily_units_sold || 0,
+              existing.labor_cost_per_batch || 0
             )
           );
         }
@@ -383,20 +468,67 @@ export default function CalculatorProductScreen() {
   const validateStep2 = (): boolean => {
     const errs: { [key: string]: string } = {};
 
+    // Validate global negative checks
+    if (manualCostPerPiece.trim().startsWith('-') || parseNum(manualCostPerPiece) < 0) {
+      errs.manualCostPerPiece = 'Cost cannot be negative';
+    }
+    if (packTotalPrice.trim().startsWith('-') || parseNum(packTotalPrice) < 0) {
+      errs.packTotalPrice = 'Cost cannot be negative';
+    }
+    if (bulkTotalPrice.trim().startsWith('-') || parseNum(bulkTotalPrice) < 0) {
+      errs.bulkTotalPrice = 'Cost cannot be negative';
+    }
+    if (laborCostPerBatch.trim().startsWith('-') || parseNum(laborCostPerBatch) < 0) {
+      errs.laborCostPerBatch = 'Labor cost cannot be negative';
+    }
+    if (dagdagGastosPerPiece.trim().startsWith('-') || parseNum(dagdagGastosPerPiece) < 0) {
+      errs.dagdagGastosPerPiece = 'Extra cost cannot be negative';
+    }
+
     if (purchaseMode === 'piece') {
-      if (parseNum(manualCostPerPiece) <= 0) errs.manualCostPerPiece = 'Enter the cost per piece';
+      if (!manualCostPerPiece.trim()) {
+        errs.manualCostPerPiece = 'Enter the cost per piece';
+      } else if (parseNum(manualCostPerPiece) <= 0 && !errs.manualCostPerPiece) {
+        errs.manualCostPerPiece = 'Cost must be greater than zero';
+      }
+      if (batchPieces.trim() === '0') {
+        errs.batchPieces = 'Batch quantity must be greater than zero';
+      } else if (parseNum(batchPieces) < 0) {
+        errs.batchPieces = 'Quantity cannot be negative';
+      }
     } else if (purchaseMode === 'pack' || purchaseMode === 'case') {
-      if (parseNum(packTotalPrice) <= 0) errs.packTotalPrice = 'Enter the total you paid';
-      if (parseNum(packItemCount) <= 0) errs.packItemCount = 'How many items inside?';
+      if (!packTotalPrice.trim()) {
+        errs.packTotalPrice = 'Enter the total you paid';
+      } else if (parseNum(packTotalPrice) <= 0 && !errs.packTotalPrice) {
+        errs.packTotalPrice = 'Cost must be greater than zero';
+      }
+
+      if (!packItemCount.trim()) {
+        errs.packItemCount = 'How many items inside?';
+      } else if (packItemCount.trim() === '0' || parseNum(packItemCount) <= 0) {
+        errs.packItemCount = 'Batch quantity must be greater than zero';
+      }
     } else {
       const quantity = parseNum(bulkQuantity);
       const portion = toBaseUnit(parseNum(bulkPortionSize), portionUnit);
       const unit = purchaseMode === 'kilo' ? 'kilos' : 'liters';
 
-      if (quantity <= 0) errs.bulkQuantity = `Enter how many ${unit} you bought`;
-      if (parseNum(bulkTotalPrice) <= 0) errs.bulkTotalPrice = 'Enter the total you paid';
-      if (portion <= 0) {
+      if (!bulkQuantity.trim()) {
+        errs.bulkQuantity = `Enter how many ${unit} you bought`;
+      } else if (bulkQuantity.trim() === '0' || quantity <= 0) {
+        errs.bulkQuantity = `Batch quantity must be greater than zero`;
+      }
+
+      if (!bulkTotalPrice.trim()) {
+        errs.bulkTotalPrice = 'Enter the total you paid';
+      } else if (parseNum(bulkTotalPrice) <= 0 && !errs.bulkTotalPrice) {
+        errs.bulkTotalPrice = 'Cost must be greater than zero';
+      }
+
+      if (!bulkPortionSize.trim()) {
         errs.bulkPortionSize = 'Enter how much you want to sell at a time';
+      } else if (parseNum(bulkPortionSize) <= 0) {
+        errs.bulkPortionSize = 'Portion size must be greater than zero';
       } else if (quantity > 0 && portion > quantity) {
         // Otherwise the derived count silently floors to zero and every figure
         // downstream reads as ₱0.00 with nothing explaining why.
@@ -523,6 +655,8 @@ export default function CalculatorProductScreen() {
         bulk_pieces_yielded:
           purchaseMode === 'kilo' || purchaseMode === 'liter' ? cost.batchPieces : null,
 
+        material_cost: cost.materialCostPerPiece || null,
+        labor_cost_per_batch: parseNum(laborCostPerBatch) || null,
         dagdag_gastos_per_piece: cost.dagdagGastosPerPiece,
         estimated_daily_units_sold: estimatedDailyUnitsSold ? parseNum(estimatedDailyUnitsSold) : null,
 
@@ -754,7 +888,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="decimal-pad"
                     value={manualCostPerPiece}
                     onChangeText={(t) => {
-                      setManualCostPerPiece(t);
+                      const clean = sanitizeDecimal(t);
+                      setManualCostPerPiece(clean);
                       if (fieldErrors.manualCostPerPiece) setFieldErrors({ ...fieldErrors, manualCostPerPiece: '' });
                     }}
                     error={fieldErrors.manualCostPerPiece}
@@ -764,7 +899,12 @@ export default function CalculatorProductScreen() {
                     placeholder="e.g. 20"
                     keyboardType="number-pad"
                     value={batchPieces}
-                    onChangeText={setBatchPieces}
+                    onChangeText={(t) => {
+                      const clean = sanitizeInteger(t);
+                      setBatchPieces(clean);
+                      if (fieldErrors.batchPieces) setFieldErrors({ ...fieldErrors, batchPieces: '' });
+                    }}
+                    error={fieldErrors.batchPieces}
                     hint="Used to work out when you earn your capital back."
                   />
                 </View>
@@ -778,7 +918,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="decimal-pad"
                     value={packTotalPrice}
                     onChangeText={(t) => {
-                      setPackTotalPrice(t);
+                      const clean = sanitizeDecimal(t);
+                      setPackTotalPrice(clean);
                       if (fieldErrors.packTotalPrice) setFieldErrors({ ...fieldErrors, packTotalPrice: '' });
                     }}
                     error={fieldErrors.packTotalPrice}
@@ -789,7 +930,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="number-pad"
                     value={packItemCount}
                     onChangeText={(t) => {
-                      setPackItemCount(t);
+                      const clean = sanitizeInteger(t);
+                      setPackItemCount(clean);
                       if (fieldErrors.packItemCount) setFieldErrors({ ...fieldErrors, packItemCount: '' });
                     }}
                     error={fieldErrors.packItemCount}
@@ -805,7 +947,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="decimal-pad"
                     value={bulkQuantity}
                     onChangeText={(t) => {
-                      setBulkQuantity(t);
+                      const clean = sanitizeDecimal(t);
+                      setBulkQuantity(clean);
                       if (fieldErrors.bulkQuantity) setFieldErrors({ ...fieldErrors, bulkQuantity: '' });
                     }}
                     error={fieldErrors.bulkQuantity}
@@ -816,7 +959,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="decimal-pad"
                     value={bulkTotalPrice}
                     onChangeText={(t) => {
-                      setBulkTotalPrice(t);
+                      const clean = sanitizeDecimal(t);
+                      setBulkTotalPrice(clean);
                       if (fieldErrors.bulkTotalPrice) setFieldErrors({ ...fieldErrors, bulkTotalPrice: '' });
                     }}
                     error={fieldErrors.bulkTotalPrice}
@@ -848,7 +992,8 @@ export default function CalculatorProductScreen() {
                     keyboardType="decimal-pad"
                     value={bulkPortionSize}
                     onChangeText={(t) => {
-                      setBulkPortionSize(t);
+                      const clean = sanitizeDecimal(t);
+                      setBulkPortionSize(clean);
                       if (fieldErrors.bulkPortionSize) setFieldErrors({ ...fieldErrors, bulkPortionSize: '' });
                     }}
                     error={fieldErrors.bulkPortionSize}
@@ -868,15 +1013,200 @@ export default function CalculatorProductScreen() {
                 </View>
               )}
 
+              <View style={styles.laborHeaderRow}>
+                <Text style={styles.laborFieldTitle}>Labor cost per batch (optional)</Text>
+                <TouchableOpacity
+                  style={[styles.laborHelperBadge, showLaborAssistant && styles.laborHelperBadgeActive]}
+                  onPress={() => setShowLaborAssistant(!showLaborAssistant)}
+                  activeOpacity={0.8}
+                >
+                  <Clock size={12} color={showLaborAssistant ? '#FFFFFF' : LikhoraColors.primary} style={{ marginRight: 4 }} />
+                  <Text style={[styles.laborHelperBadgeText, showLaborAssistant && styles.laborHelperBadgeTextActive]}>
+                    {showLaborAssistant ? 'Hide DOLE Helper' : 'DOLE Wage Assistant'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {showLaborAssistant && (
+                <View style={styles.laborAssistantCard}>
+                  <View style={styles.assistantHeader}>
+                    <Sparkles size={14} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
+                    <Text style={styles.assistantTitle}>Philippine Regional Wage Calculator</Text>
+                  </View>
+                  <Text style={styles.assistantDesc}>
+                    Compute fair batch labor using DOLE NWPC minimum wage orders or your custom rate.
+                  </Text>
+
+                  {/* Region selector chips */}
+                  <Text style={styles.assistantSubLabel}>Select Region / Rate Preset:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.wageChipsRow}>
+                    {PHILIPPINE_REGIONAL_WAGES.map((preset) => {
+                      const isSelected = !isCustomHourlyRate && selectedWagePreset.id === preset.id;
+                      return (
+                        <TouchableOpacity
+                          key={preset.id}
+                          style={[styles.wageChip, isSelected && styles.wageChipSelected]}
+                          onPress={() => {
+                            setIsCustomHourlyRate(false);
+                            setSelectedWagePreset(preset);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.wageChipText, isSelected && styles.wageChipTextSelected]}>
+                            {preset.shortName} (₱{preset.hourlyRate.toFixed(1)}/h)
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                    <TouchableOpacity
+                      style={[styles.wageChip, isCustomHourlyRate && styles.wageChipSelected]}
+                      onPress={() => setIsCustomHourlyRate(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.wageChipText, isCustomHourlyRate && styles.wageChipTextSelected]}>
+                        Custom Rate
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+
+                  {isCustomHourlyRate ? (
+                    <View style={{ marginTop: 8 }}>
+                      <Input
+                        label="Custom Hourly Rate (₱/hr)"
+                        placeholder="e.g. 75.00"
+                        keyboardType="decimal-pad"
+                        value={customHourlyRate}
+                        onChangeText={(t) => setCustomHourlyRate(sanitizeDecimal(t))}
+                        hint="Enter your negotiated or preferred hourly rate."
+                      />
+                    </View>
+                  ) : (
+                    <View style={styles.selectedWageBanner}>
+                      <Text style={styles.selectedWageRegion}>{selectedWagePreset.region}</Text>
+                      <Text style={styles.selectedWageRate}>
+                        ₱{selectedWagePreset.dailyRate}/day · ₱{selectedWagePreset.hourlyRate.toFixed(2)}/hr (8-hr baseline)
+                      </Text>
+                      <Text style={styles.selectedWageNote}>{selectedWagePreset.description}</Text>
+                    </View>
+                  )}
+
+                  {/* Hours per batch & workers */}
+                  <View style={styles.assistantRow}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={styles.assistantFieldLabel}>Prep / Assembly Hours:</Text>
+                      <Input
+                        placeholder="e.g. 1.5"
+                        keyboardType="decimal-pad"
+                        value={laborHours}
+                        onChangeText={(t) => setLaborHours(sanitizeDecimal(t))}
+                      />
+                      <View style={styles.quickHourRow}>
+                        {['0.5', '1', '2', '3'].map((h) => (
+                          <TouchableOpacity
+                            key={h}
+                            style={[styles.quickHourChip, laborHours === h && styles.quickHourChipActive]}
+                            onPress={() => setLaborHours(h)}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.quickHourText, laborHours === h && styles.quickHourTextActive]}>
+                              {h}h
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* Number of workers */}
+                    <View style={{ width: 110 }}>
+                      <Text style={styles.assistantFieldLabel}>Workers:</Text>
+                      <View style={styles.workerStepper}>
+                        <TouchableOpacity
+                          style={styles.stepperBtn}
+                          onPress={() => setLaborWorkers((w) => Math.max(1, w - 1))}
+                          activeOpacity={0.7}
+                        >
+                          <Minus size={14} color={LikhoraColors.textPrimary} />
+                        </TouchableOpacity>
+                        <Text style={styles.stepperVal}>{laborWorkers}</Text>
+                        <TouchableOpacity
+                          style={styles.stepperBtn}
+                          onPress={() => setLaborWorkers((w) => w + 1)}
+                          activeOpacity={0.7}
+                        >
+                          <Plus size={14} color={LikhoraColors.textPrimary} />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.workerSub}>
+                        {laborWorkers === 1 ? '1 worker' : `${laborWorkers} workers`}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Computed live summary */}
+                  <View style={styles.assistantCalcBox}>
+                    <View style={styles.calcMathRow}>
+                      <Text style={styles.calcMathText}>
+                        ₱{effectiveHourlyRate.toFixed(2)}/hr × {parseNum(laborHours) || 0} hrs × {laborWorkers} worker{laborWorkers > 1 ? 's' : ''}
+                      </Text>
+                      <Text style={styles.calcTotalVal}>{peso(assistantComputedLabor)}</Text>
+                    </View>
+                    {cost.batchPieces > 0 && (
+                      <Text style={styles.calcPieceSub}>
+                        = {peso(cost.batchPieces > 0 ? assistantComputedLabor / cost.batchPieces : 0)} per piece across {cost.batchPieces} pcs
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Apply button */}
+                  <TouchableOpacity
+                    style={[styles.applyLaborBtn, assistantAppliedNotice && styles.applyLaborBtnSuccess]}
+                    onPress={handleApplyLabor}
+                    activeOpacity={0.85}
+                  >
+                    {assistantAppliedNotice ? (
+                      <>
+                        <Check size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.applyLaborBtnText}>Applied to Batch Labor!</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={styles.applyLaborBtnText}>
+                          Apply {peso(assistantComputedLabor)} to Batch Labor
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <Input
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                value={laborCostPerBatch}
+                onChangeText={(t) => {
+                  const clean = sanitizeDecimal(t);
+                  setLaborCostPerBatch(clean);
+                  if (fieldErrors.laborCostPerBatch) setFieldErrors({ ...fieldErrors, laborCostPerBatch: '' });
+                }}
+                error={fieldErrors.laborCostPerBatch}
+                hint="Total labor paid for this entire batch. Divided across your batch yield."
+              />
+
               {/* Left in plain sight. Folded away, extra costs were easy to
                   miss entirely — and a price that ignores ice, plastic and
                   fuel is wrong in the direction that loses money. */}
               <Input
-                label="Extra cost per piece (optional)"
+                label="Extra cost / Overhead per piece (optional)"
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={dagdagGastosPerPiece}
-                onChangeText={setDagdagGastosPerPiece}
+                onChangeText={(t) => {
+                  const clean = sanitizeDecimal(t);
+                  setDagdagGastosPerPiece(clean);
+                  if (fieldErrors.dagdagGastosPerPiece) setFieldErrors({ ...fieldErrors, dagdagGastosPerPiece: '' });
+                }}
+                error={fieldErrors.dagdagGastosPerPiece}
                 hint={`e.g. ${EXTRA_COST_EXAMPLES}.`}
               />
 
@@ -885,13 +1215,20 @@ export default function CalculatorProductScreen() {
                 placeholder="e.g. 15"
                 keyboardType="number-pad"
                 value={estimatedDailyUnitsSold}
-                onChangeText={setEstimatedDailyUnitsSold}
+                onChangeText={(t) => setEstimatedDailyUnitsSold(sanitizeInteger(t))}
                 hint="A rough guess is fine. Leave it blank if you have not started selling yet."
               />
 
               {cost.totalCostPerPiece > 0 && (
                 <View style={styles.liveStrip}>
-                  <Text style={styles.liveStripLabel}>Cost per piece</Text>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.liveStripLabel}>Total cost per piece</Text>
+                    <Text style={styles.liveStripSub}>
+                      {`Material: ${peso(cost.materialCostPerPiece)}` +
+                        (cost.laborCostPerPiece > 0 ? ` · Labor: ${peso(cost.laborCostPerPiece)}` : '') +
+                        (cost.overheadPerPiece > 0 ? ` · Overhead: ${peso(cost.overheadPerPiece)}` : '')}
+                    </Text>
+                  </View>
                   <Text style={styles.liveStripValue}>{peso(cost.totalCostPerPiece)}</Text>
                 </View>
               )}
@@ -960,6 +1297,103 @@ export default function CalculatorProductScreen() {
                     </View>
                   )}
 
+                  {/* Visual Margin & Cost Breakdown Bar */}
+                  {price > 0 && (
+                    <View style={styles.breakdownRatioCard}>
+                      <View style={styles.breakdownHeaderRow}>
+                        <Text style={styles.breakdownCardTitle}>Price & Cost Structure</Text>
+                        <Text style={styles.breakdownSellingPrice}>{peso(price)}</Text>
+                      </View>
+
+                      {/* Stacked Ratio Bar */}
+                      <View style={styles.segmentedBarTrack}>
+                        {cost.materialCostPerPiece > 0 && (
+                          <View
+                            style={[
+                              styles.segmentPiece,
+                              {
+                                flex: Math.max(0.01, cost.materialCostPerPiece),
+                                backgroundColor: '#42143E', // Brand Plum
+                              },
+                            ]}
+                          />
+                        )}
+                        {cost.laborCostPerPiece > 0 && (
+                          <View
+                            style={[
+                              styles.segmentPiece,
+                              {
+                                flex: Math.max(0.01, cost.laborCostPerPiece),
+                                backgroundColor: '#F59E0B', // Amber Gold
+                              },
+                            ]}
+                          />
+                        )}
+                        {cost.overheadPerPiece > 0 && (
+                          <View
+                            style={[
+                              styles.segmentPiece,
+                              {
+                                flex: Math.max(0.01, cost.overheadPerPiece),
+                                backgroundColor: '#64748B', // Slate Grey
+                              },
+                            ]}
+                          />
+                        )}
+                        {outcome.tuboPerPiece > 0 && (
+                          <View
+                            style={[
+                              styles.segmentPiece,
+                              {
+                                flex: Math.max(0.01, outcome.tuboPerPiece),
+                                backgroundColor: '#10B981', // Emerald Green
+                              },
+                            ]}
+                          />
+                        )}
+                      </View>
+
+                      {/* Legend Row */}
+                      <View style={styles.breakdownLegendRow}>
+                        <View style={styles.legendItem}>
+                          <View style={[styles.legendDot, { backgroundColor: '#42143E' }]} />
+                          <Text style={styles.legendLabel}>Material</Text>
+                          <Text style={styles.legendValue}>
+                            {peso(cost.materialCostPerPiece)} ({price > 0 ? Math.round((cost.materialCostPerPiece / price) * 100) : 0}%)
+                          </Text>
+                        </View>
+
+                        {cost.laborCostPerPiece > 0 && (
+                          <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#F59E0B' }]} />
+                            <Text style={styles.legendLabel}>Labor</Text>
+                            <Text style={styles.legendValue}>
+                              {peso(cost.laborCostPerPiece)} ({price > 0 ? Math.round((cost.laborCostPerPiece / price) * 100) : 0}%)
+                            </Text>
+                          </View>
+                        )}
+
+                        {cost.overheadPerPiece > 0 && (
+                          <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#64748B' }]} />
+                            <Text style={styles.legendLabel}>Overhead</Text>
+                            <Text style={styles.legendValue}>
+                              {peso(cost.overheadPerPiece)} ({price > 0 ? Math.round((cost.overheadPerPiece / price) * 100) : 0}%)
+                            </Text>
+                          </View>
+                        )}
+
+                        <View style={styles.legendItem}>
+                          <View style={[styles.legendDot, { backgroundColor: '#10B981' }]} />
+                          <Text style={styles.legendLabel}>Profit (Tubo)</Text>
+                          <Text style={[styles.legendValue, { color: '#047857', fontWeight: '800' }]}>
+                            {peso(outcome.tuboPerPiece)} ({price > 0 ? outcome.marginPercent.toFixed(0) : 0}%)
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
                   <View style={styles.khoraCard}>
                     <View style={styles.khoraHeader}>
                       <Sparkles size={14} color={LikhoraColors.aiBlue} style={{ marginRight: 6 }} />
@@ -1016,25 +1450,41 @@ export default function CalculatorProductScreen() {
 
                   {showMath && (
                     <View style={styles.mathCard}>
-                      <MathRow label="Cost per piece" value={peso(cost.puhunan)} />
-                      {cost.dagdagGastosPerPiece > 0 && (
-                        <MathRow label="Extra cost per piece" value={peso(cost.dagdagGastosPerPiece)} />
+                      <Text style={styles.mathSectionTitle}>COST BREAKDOWN (PUHUNAN)</Text>
+                      <MathRow label="Material / Ingredient cost" value={peso(cost.materialCostPerPiece)} />
+                      {cost.laborCostPerPiece > 0 && (
+                        <MathRow label="Labor cost per piece" value={peso(cost.laborCostPerPiece)} />
                       )}
-                      <MathRow label="Total cost per piece" value={peso(cost.totalCostPerPiece)} />
+                      {cost.overheadPerPiece > 0 && (
+                        <MathRow label="Overhead (Dagdag-gastos)" value={peso(cost.overheadPerPiece)} />
+                      )}
+                      <MathRow label="Total Unit Cost" value={peso(cost.totalCostPerPiece)} bold />
+
                       <View style={styles.mathDivider} />
-                      <MathRow label="Selling price" value={peso(price)} />
-                      <MathRow label="Profit per piece" value={peso(outcome.tuboPerPiece)} valueColor={LikhoraColors.successGreen} />
+                      <Text style={styles.mathSectionTitle}>PRICE & PROFIT</Text>
+                      <MathRow label="Selling price" value={peso(price)} bold />
+                      <MathRow label="Profit per piece (Tubo)" value={peso(outcome.tuboPerPiece)} valueColor={LikhoraColors.successGreen} bold />
                       <MathRow label="Margin" value={`${outcome.marginPercent.toFixed(1)}%`} />
-                      <MathRow label="Markup" value={`${outcome.markupPercentEffective.toFixed(1)}%`} />
+                      <MathRow label="Effective Markup" value={`${outcome.markupPercentEffective.toFixed(1)}%`} />
+
                       {cost.batchPieces > 0 && (
                         <>
                           <View style={styles.mathDivider} />
-                          <MathRow label={`Capital for ${cost.batchPieces} pcs`} value={peso(cost.batchTotalInvestment)} />
+                          <Text style={styles.mathSectionTitle}>BATCH TOTALS ({cost.batchPieces} PCS)</Text>
+                          <MathRow label="Batch Material Spend" value={peso(cost.batchMaterialSpend)} />
+                          {cost.batchLaborSpend > 0 && (
+                            <MathRow label="Batch Labor Spend" value={peso(cost.batchLaborSpend)} />
+                          )}
+                          {cost.batchOverheadSpend > 0 && (
+                            <MathRow label="Batch Overhead Spend" value={peso(cost.batchOverheadSpend)} />
+                          )}
+                          <MathRow label="Total Batch Capital" value={peso(cost.batchTotalInvestment)} bold />
                           <MathRow label="Revenue if all sold" value={peso(outcome.batchTotalRevenuePotential)} />
                           <MathRow
-                            label="Total profit"
+                            label="Total Batch Profit"
                             value={peso(outcome.batchTotalProfitPotential)}
                             valueColor={LikhoraColors.successGreen}
+                            bold
                           />
                         </>
                       )}
@@ -1082,14 +1532,17 @@ export default function CalculatorProductScreen() {
   );
 }
 
-const MathRow: React.FC<{ label: string; value: string; valueColor?: string }> = ({
-  label,
-  value,
-  valueColor,
-}) => (
+const MathRow: React.FC<{
+  label: string;
+  value: string;
+  valueColor?: string;
+  bold?: boolean;
+}> = ({ label, value, valueColor, bold }) => (
   <View style={styles.mathRow}>
-    <Text style={styles.mathLabel}>{label}</Text>
-    <Text style={[styles.mathValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
+    <Text style={[styles.mathLabel, bold && { fontWeight: '700', color: LikhoraColors.textPrimary }]}>{label}</Text>
+    <Text style={[styles.mathValue, valueColor ? { color: valueColor } : null, bold && { fontWeight: '900' }]}>
+      {value}
+    </Text>
   </View>
 );
 
@@ -1351,6 +1804,12 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textSecondary,
     fontFamily: LikhoraFont.fontFamily,
   },
+  liveStripSub: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    marginTop: 2,
+    fontFamily: LikhoraFont.fontFamily,
+  },
   liveStripValue: {
     fontSize: 17,
     fontWeight: '800',
@@ -1563,6 +2022,15 @@ const styles = StyleSheet.create({
     borderColor: LikhoraColors.border,
     padding: Spacing.three,
   },
+  mathSectionTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: LikhoraColors.textSecondary,
+    letterSpacing: 0.8,
+    marginBottom: 4,
+    marginTop: 2,
+    fontFamily: LikhoraFont.fontFamily,
+  },
   mathRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 },
   mathLabel: { fontSize: 12, color: LikhoraColors.textSecondary, fontFamily: LikhoraFont.fontFamily },
   mathValue: {
@@ -1572,6 +2040,312 @@ const styles = StyleSheet.create({
     fontFamily: LikhoraFont.fontFamily,
   },
   mathDivider: { height: 1, backgroundColor: LikhoraColors.border, marginVertical: 8 },
+  laborHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  laborFieldTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  laborHelperBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3E8FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.pill,
+  },
+  laborHelperBadgeActive: {
+    backgroundColor: LikhoraColors.primary,
+  },
+  laborHelperBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  laborHelperBadgeTextActive: {
+    color: '#FFFFFF',
+  },
+
+  laborAssistantCard: {
+    backgroundColor: '#FAF5FF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: 12,
+  },
+  assistantHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  assistantTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  assistantDesc: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    marginBottom: 10,
+    lineHeight: 17,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  assistantSubLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    marginBottom: 6,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  wageChipsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingBottom: 4,
+  },
+  wageChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Radius.medium,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  wageChipSelected: {
+    backgroundColor: LikhoraColors.primary,
+    borderColor: LikhoraColors.primary,
+  },
+  wageChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  wageChipTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  selectedWageBanner: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+    borderRadius: Radius.medium,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  selectedWageRegion: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  selectedWageRate: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    marginTop: 2,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  selectedWageNote: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    marginTop: 2,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  assistantRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 4,
+  },
+  assistantFieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: LikhoraColors.textPrimary,
+    marginBottom: 4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  quickHourRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: -8,
+    marginBottom: 6,
+  },
+  quickHourChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.small,
+    backgroundColor: '#E5E7EB',
+  },
+  quickHourChipActive: {
+    backgroundColor: LikhoraColors.primary,
+  },
+  quickHourText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  quickHourTextActive: {
+    color: '#FFFFFF',
+  },
+  workerStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: Radius.medium,
+    height: 44,
+    paddingHorizontal: 6,
+  },
+  stepperBtn: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.small,
+    backgroundColor: '#F3F4F6',
+  },
+  stepperVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  workerSub: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    textAlign: 'center',
+    marginTop: 4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  assistantCalcBox: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: Radius.medium,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  calcMathRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  calcMathText: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    flex: 1,
+    marginRight: 8,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  calcTotalVal: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  calcPieceSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: LikhoraColors.textSecondary,
+    marginTop: 4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  applyLaborBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LikhoraColors.primary,
+    paddingVertical: 10,
+    borderRadius: Radius.medium,
+  },
+  applyLaborBtnSuccess: {
+    backgroundColor: LikhoraColors.successGreen,
+  },
+  applyLaborBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+
+  breakdownRatioCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F3E8FF',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginTop: Spacing.three,
+  },
+  breakdownHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  breakdownCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  breakdownSellingPrice: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  segmentedBarTrack: {
+    flexDirection: 'row',
+    height: 12,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    marginBottom: 12,
+  },
+  segmentPiece: {
+    height: '100%',
+  },
+  breakdownLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 5,
+  },
+  legendLabel: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    marginRight: 4,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  legendValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
 
   footer: {
     paddingHorizontal: Spacing.four,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Modal
+  Modal,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   CheckCircle2,
   Sparkles,
@@ -38,6 +40,14 @@ import {
   Shirt,
   PawPrint,
   Droplets,
+  SkipForward,
+  Lightbulb,
+  Code,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Trash2,
+  FolderKanban,
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -52,13 +62,33 @@ import {
   TemplateIcon,
   filterTemplates,
 } from '@/services/startupTemplates';
+import {
+  UserSavedRoadmap,
+  getSavedRoadmaps,
+  saveAllRoadmaps,
+  getActiveRoadmapMeta,
+  setActiveRoadmapMeta,
+  syncActiveRoadmapTasks,
+  switchRoadmap,
+  deleteSavedRoadmap,
+  getRoadmapProgress,
+} from '@/services/roadmapStorage';
 import { notify } from '@/utils/dialog';
 import { askKhoraAI } from '@/services/claude';
 import { getNextStepRecommendation, NextStepRecommendation } from '@/services/nextStepAdvisor';
+import {
+  matchRegistryProfile,
+  analyzeBusinessRegulation,
+  RegulatoryProfile,
+} from '@/services/regulatoryAdvisor';
 
 // Helper to guarantee authentic legal basis, agency, timeline, cost, required docs, and actionable sub-steps for any task
 const ensureSubSteps = (task: RoadmapTask): RoadmapTask => {
-  if (task.sub_steps && task.sub_steps.length > 0 && task.legal_basis) return task;
+  const isGenericLegalBasis =
+    !task.legal_basis ||
+    task.legal_basis === 'Philippine Business Regulatory Compliance Standards';
+
+  if (task.sub_steps && task.sub_steps.length > 0 && !isGenericLegalBasis) return task;
 
   const defaultSubStepsMap: Record<string, { legal: string; agency: string; time: string; cost: string; docs: string[]; sub: string[] }> = {
     'Barangay': {
@@ -98,6 +128,215 @@ const ensureSubSteps = (task: RoadmapTask): RoadmapTask => {
         'Undergo BFP Fire Safety Inspection & City Health Sanitary Inspection',
         'Pay Mayor Permit Fee, Garbage Fee & Sanitary License at City Treasurer',
         'Claim official Mayor Business Permit, Business Plate & Sanitary Inspection Sticker',
+      ],
+    },
+    'FDA': {
+      legal: 'RA 10918 (Philippine Pharmacy Act) & RA 9711 (FDA Act of 2009)',
+      agency: 'Food and Drug Administration (FDA eServices)',
+      time: '15 - 30 Business Days',
+      cost: '₱2,000 - ₱5,000',
+      docs: [
+        'PRC Pharmacist License & Notarized Agreement',
+        'FDA eServices Application Form',
+        'Store Floor Plan & Vicinity Map',
+        'Refrigerator & Thermometer Calibration Proof',
+        'Philippine National Drug Formulary (PNDF)',
+      ],
+      sub: [
+        'Contract PRC Registered Pharmacist and notarize Pharmacist-Owner Agreement',
+        'Equip store with dedicated pharmaceutical refrigerator and digital temperature logbook',
+        'Register FDA eServices account at eservices.fda.gov.ph and submit LTO Drug Outlet form',
+        'Upload location floor plan, pharmacist credentials, and pay official FDA inspection fee',
+        'Undergo FDA post-marketing inspection and download official LTO Certificate',
+      ],
+    },
+    'Pharmacy': {
+      legal: 'RA 10918 (Philippine Pharmacy Act) & RA 9711 (FDA Act of 2009)',
+      agency: 'Food and Drug Administration (FDA eServices)',
+      time: '15 - 30 Business Days',
+      cost: '₱2,000 - ₱5,000',
+      docs: [
+        'PRC Pharmacist License & Notarized Agreement',
+        'FDA eServices Application Form',
+        'Store Floor Plan & Vicinity Map',
+        'Refrigerator & Thermometer Calibration Proof',
+        'Philippine National Drug Formulary (PNDF)',
+      ],
+      sub: [
+        'Contract PRC Registered Pharmacist and notarize Pharmacist-Owner Agreement',
+        'Equip store with dedicated pharmaceutical refrigerator and digital temperature logbook',
+        'Register FDA eServices account at eservices.fda.gov.ph and submit LTO Drug Outlet form',
+        'Upload location floor plan, pharmacist credentials, and pay official FDA inspection fee',
+        'Undergo FDA post-marketing inspection and download official LTO Certificate',
+      ],
+    },
+    'Potability': {
+      legal: 'PD 856 (Sanitation Code) & PNSDW (AO 2017-0010)',
+      agency: 'City Health Office Sanitation Division & DOH Accredited Lab',
+      time: '7 - 14 Business Days',
+      cost: '₱3,000 - ₱6,000',
+      docs: [
+        'DOH-Accredited Lab Microbiological Test',
+        'Physical-Chemical Lab Test Report',
+        'Personnel Sanitary Health Cards',
+        'Water Treatment System Flowchart Schematic',
+      ],
+      sub: [
+        'Submit product water samples to DOH-accredited testing laboratory for bacteriological analysis',
+        'Send station crew to City Health Office for chest X-ray, stool test, and pink health cards',
+        'Establish documented daily backwashing and UV lamp inspection logbook',
+        'Undergo City Sanitary Inspector on-site inspection of filling room and wash sink',
+        'Claim official Sanitary Permit and framed Certificate of Potability for public display',
+      ],
+    },
+    'Water': {
+      legal: 'PD 856 (Sanitation Code) & PNSDW (AO 2017-0010)',
+      agency: 'City Health Office Sanitation Division & DOH Accredited Lab',
+      time: '7 - 14 Business Days',
+      cost: '₱3,000 - ₱6,000',
+      docs: [
+        'DOH-Accredited Lab Microbiological Test',
+        'Physical-Chemical Lab Test Report',
+        'Personnel Sanitary Health Cards',
+        'Water Treatment System Flowchart Schematic',
+      ],
+      sub: [
+        'Submit product water samples to DOH-accredited testing laboratory for bacteriological analysis',
+        'Send station crew to City Health Office for chest X-ray, stool test, and pink health cards',
+        'Establish documented daily backwashing and UV lamp inspection logbook',
+        'Undergo City Sanitary Inspector on-site inspection of filling room and wash sink',
+        'Claim official Sanitary Permit and framed Certificate of Potability for public display',
+      ],
+    },
+    'Sanitary': {
+      legal: 'PD 856 Sanitation Code & RA 10611 Food Safety Act of 2013',
+      agency: 'City / Municipal Health Office Sanitation Section',
+      time: '5 - 10 Business Days',
+      cost: '₱1,500 - ₱3,500',
+      docs: [
+        'Staff Medical Exam & Laboratory Clearances',
+        'Grease Trap Installation Receipt/Photo',
+        'Pest Control Inspection Certification',
+        'Potable Water Source Certificate',
+      ],
+      sub: [
+        'Coordinate staff laboratory tests (chest X-ray & stool examination) at City Health Clinic',
+        'Install required kitchen grease trap and ensure food warmers have glass sneeze guards',
+        'Attend LGU Food Safety & Hygiene Seminar to secure food handler credentials',
+        'Undergo City Sanitary Inspector kitchen and dining inspection',
+        'Obtain framed Sanitary Permit to Operate and post prominently in dining area',
+      ],
+    },
+    'Food': {
+      legal: 'PD 856 Sanitation Code & RA 10611 Food Safety Act of 2013',
+      agency: 'City / Municipal Health Office Sanitation Section',
+      time: '5 - 10 Business Days',
+      cost: '₱1,500 - ₱3,500',
+      docs: [
+        'Staff Medical Exam & Laboratory Clearances',
+        'Grease Trap Installation Receipt/Photo',
+        'Pest Control Inspection Certification',
+        'Potable Water Source Certificate',
+      ],
+      sub: [
+        'Coordinate staff laboratory tests (chest X-ray & stool examination) at City Health Clinic',
+        'Install required kitchen grease trap and ensure food warmers have glass sneeze guards',
+        'Attend LGU Food Safety & Hygiene Seminar to secure food handler credentials',
+        'Undergo City Sanitary Inspector kitchen and dining inspection',
+        'Obtain framed Sanitary Permit to Operate and post prominently in dining area',
+      ],
+    },
+    'Veterinary': {
+      legal: 'RA 8485 (Animal Welfare Act) & RA 9482 (Anti-Rabies Act)',
+      agency: 'Bureau of Animal Industry (BAI) & City Veterinary Office',
+      time: '10 - 20 Business Days',
+      cost: '₱2,500 - ₱5,000',
+      docs: [
+        'PRC Veterinarian License & Certificate of Good Standing',
+        'BAI Animal Facility Application Form',
+        'Clinic Floor Plan with Isolation Area',
+        'Biohazard / Sharps Waste Disposal Agreement',
+      ],
+      sub: [
+        'Partner with PRC Licensed Veterinarian and register with City Veterinary Office',
+        'Install proper stainless cages, isolation ward, and dedicated medical waste container',
+        'Submit Animal Facility Registration application to Bureau of Animal Industry (BAI)',
+        'Undergo BAI facility inspection evaluating ventilation, sanitation, and animal welfare',
+        'Receive official BAI Certificate of Registration for public clinic display',
+      ],
+    },
+    'BAI': {
+      legal: 'RA 8485 (Animal Welfare Act) & RA 9482 (Anti-Rabies Act)',
+      agency: 'Bureau of Animal Industry (BAI) & City Veterinary Office',
+      time: '10 - 20 Business Days',
+      cost: '₱2,500 - ₱5,000',
+      docs: [
+        'PRC Veterinarian License & Certificate of Good Standing',
+        'BAI Animal Facility Application Form',
+        'Clinic Floor Plan with Isolation Area',
+        'Biohazard / Sharps Waste Disposal Agreement',
+      ],
+      sub: [
+        'Partner with PRC Licensed Veterinarian and register with City Veterinary Office',
+        'Install proper stainless cages, isolation ward, and dedicated medical waste container',
+        'Submit Animal Facility Registration application to Bureau of Animal Industry (BAI)',
+        'Undergo BAI facility inspection evaluating ventilation, sanitation, and animal welfare',
+        'Receive official BAI Certificate of Registration for public clinic display',
+      ],
+    },
+    'PCAB': {
+      legal: 'RA 4566 (Contractor Licensing Law) & DOLE DO 198-18 (OSH Act)',
+      agency: 'Philippine Contractors Accreditation Board (PCAB / CIAP)',
+      time: '20 - 45 Business Days',
+      cost: '₱7,000 - ₱15,000',
+      docs: [
+        'AMO Seminar Completion Certificate',
+        'COSH 40-Hour Safety Officer Certificate',
+        'Audited Financial Statements / Bank Certification',
+        'DTI Certificate / SEC Registration',
+      ],
+      sub: [
+        'Complete the 16-hour Authorized Managing Officer (AMO) seminar via CIAP portal',
+        'Appoint staff member to complete 40-hour DOLE COSH Safety Officer training',
+        'Compile audited balance sheet verifying required net worth capitalization',
+        'File online PCAB License application through the CIAP contractor portal',
+        'Claim official PCAB Contractor License Certificate and verify active listing',
+      ],
+    },
+    'Contractor': {
+      legal: 'RA 4566 (Contractor Licensing Law) & DOLE DO 198-18 (OSH Act)',
+      agency: 'Philippine Contractors Accreditation Board (PCAB / CIAP)',
+      time: '20 - 45 Business Days',
+      cost: '₱7,000 - ₱15,000',
+      docs: [
+        'AMO Seminar Completion Certificate',
+        'COSH 40-Hour Safety Officer Certificate',
+        'Audited Financial Statements / Bank Certification',
+        'DTI Certificate / SEC Registration',
+      ],
+      sub: [
+        'Complete the 16-hour Authorized Managing Officer (AMO) seminar via CIAP portal',
+        'Appoint staff member to complete 40-hour DOLE COSH Safety Officer training',
+        'Compile audited balance sheet verifying required net worth capitalization',
+        'File online PCAB License application through the CIAP contractor portal',
+        'Claim official PCAB Contractor License Certificate and verify active listing',
+      ],
+    },
+    'BMBE': {
+      legal: 'RA 9178 (Barangay Micro Business Enterprises Act) & RA 7394 (Consumer Act)',
+      agency: 'DTI Negosyo Center & Local BPLO',
+      time: '3 - 7 Business Days',
+      cost: '₱500 - ₱1,500',
+      docs: [
+        'DTI Certificate of Business Name Registration',
+        'Barangay Clearance with Micro-Enterprise Notation',
+        'Notarized Certificate of Total Assets (under ₱3 Million)',
+      ],
+      sub: [
+        'File BMBE application at local DTI Negosyo Center for 100% income tax exemption',
+        'Affix clear peso price tags to every product shelf complying with RA 7394 Price Tag Law',
+        'Ensure no tobacco or alcohol is displayed within 100 meters of any school or playground',
+        'Register BMBE status with assigned BIR RDO to formalize tax exemption endorsement',
       ],
     },
     'BIR': {
@@ -159,19 +398,35 @@ const ensureSubSteps = (task: RoadmapTask): RoadmapTask => {
     (task.desc && task.desc.toLowerCase().includes(key.toLowerCase()))
   );
 
-  const template = matchedKey ? defaultSubStepsMap[matchedKey] : {
-    legal: 'Philippine Business Regulatory Compliance Standards',
-    agency: 'Local Government Agency / Municipal Hall',
-    time: '1 - 2 Business Days',
-    cost: 'Standard Legal Fees',
-    docs: ['2 Government Valid IDs', 'DTI / Barangay Business Documents'],
-    sub: [
-      `Review regulatory legal requirements for ${task.title}`,
-      `Gather official application forms and required identification documents`,
-      `Submit application to designated government agency office / online portal`,
-      `Pay official registration fee and secure valid compliance certificate`,
-    ],
-  };
+  let template = matchedKey ? defaultSubStepsMap[matchedKey] : null;
+
+  if (!template) {
+    const regProfile = matchRegistryProfile(task.title + ' ' + (task.desc || ''));
+    if (regProfile && regProfile.roadmapTask) {
+      template = {
+        legal: regProfile.roadmapTask.legal_basis,
+        agency: regProfile.roadmapTask.agency,
+        time: regProfile.roadmapTask.estimated_time,
+        cost: regProfile.roadmapTask.estimated_cost,
+        docs: regProfile.roadmapTask.required_docs,
+        sub: regProfile.roadmapTask.sub_steps.map((s) => s.title),
+      };
+    } else {
+      template = {
+        legal: 'Philippine Business Regulatory Compliance Standards',
+        agency: 'Local Government Agency / Municipal Hall',
+        time: '1 - 2 Business Days',
+        cost: 'Standard Legal Fees',
+        docs: ['2 Government Valid IDs', 'DTI / Barangay Business Documents'],
+        sub: [
+          `Review regulatory legal requirements for ${task.title}`,
+          `Gather official application forms and required identification documents`,
+          `Submit application to designated government agency office / online portal`,
+          `Pay official registration fee and secure valid compliance certificate`,
+        ],
+      };
+    }
+  }
 
   const isTaskCompleted = task.status === 'Completed';
 
@@ -211,6 +466,10 @@ export default function RoadmapTab() {
 
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<RoadmapTask[]>([]);
+  const [savedRoadmaps, setSavedRoadmaps] = useState<UserSavedRoadmap[]>([]);
+  const [activeRoadmapId, setActiveRoadmapId] = useState<string>('main-journey');
+  const [activeRoadmapTitle, setActiveRoadmapTitle] = useState<string>('');
+  const [showMyRoadmapsModal, setShowMyRoadmapsModal] = useState(false);
   const [selectedTaskModal, setSelectedTaskModal] = useState<RoadmapTask | null>(null);
   const [aiAdviceModal, setAiAdviceModal] = useState<{ title: string; advice: string } | null>(null);
   const [taskAiAdviceMap, setTaskAiAdviceMap] = useState<Record<string, string>>({});
@@ -220,39 +479,251 @@ export default function RoadmapTab() {
   const [templateCategory, setTemplateCategory] = useState<TemplateCategory | null>(null);
   const [nextStep, setNextStep] = useState<NextStepRecommendation | null>(null);
 
-  // Load User Roadmap from Supabase or generate default
-  useEffect(() => {
-    const loadRoadmap = async () => {
-      setLoading(true);
-      let loadedTasks: RoadmapTask[] = [];
+  // Phase 3: Dynamic Philippine Industry Regulatory & Legal Compliance Advisor
+  const [showRegulatoryModal, setShowRegulatoryModal] = useState(false);
+  const [regulatoryQuery, setRegulatoryQuery] = useState('');
+  const [isAnalyzingRegulatory, setIsAnalyzingRegulatory] = useState(false);
+  const [analyzedRegulatoryProfile, setAnalyzedRegulatoryProfile] = useState<RegulatoryProfile | null>(null);
+  const [showJsonExchange, setShowJsonExchange] = useState(false);
+  const [sentJsonPayload, setSentJsonPayload] = useState<string | null>(null);
+  const [receivedJsonPayload, setReceivedJsonPayload] = useState<string | null>(null);
 
-      if (user?.uid) {
-        const { data } = await fetchUserRoadmap(user.uid);
-        if (data && data.length > 0) {
-          loadedTasks = data;
+  const handleOpenRegulatoryAdvisor = (customTarget?: string) => {
+    const target = customTarget || userProfile?.business_type || 'General Micro Business';
+    setRegulatoryQuery(target);
+    const profile = matchRegistryProfile(target);
+    setAnalyzedRegulatoryProfile(profile);
+
+    const initialSent = JSON.stringify({
+      business_type: target,
+      business_name: userProfile?.business_name || `${target} Venture`,
+      location: userProfile?.location || 'Philippines',
+      category: 'Commercial',
+      starting_budget: userProfile?.budget || 'Micro-Enterprise (< ₱100k)',
+      registration_type: 'Sole Proprietorship',
+      is_product_based: true,
+    }, null, 2);
+
+    const initialReceived = JSON.stringify({
+      business_type: profile.businessType,
+      primary_agency: profile.primaryAgency,
+      agency_acronym: profile.agencyAcronym,
+      license_name: profile.licenseName,
+      legal_basis: profile.legalBasis,
+      estimated_time: profile.estimatedTime,
+      estimated_cost: profile.estimatedCost,
+      focused_requirements: profile.focusedRequirements,
+      legal_considerations: profile.legalConsiderations,
+      mandatory_discounts_applicable: profile.mandatoryDiscountsApplicable,
+      roadmap_task: profile.roadmapTask,
+      source: profile.source,
+    }, null, 2);
+
+    setSentJsonPayload(initialSent);
+    setReceivedJsonPayload(initialReceived);
+    setShowRegulatoryModal(true);
+  };
+
+  const handleAnalyzeRegulatoryQuery = async (queryText?: string) => {
+    const queryToUse = (queryText || regulatoryQuery).trim();
+    if (!queryToUse) return;
+
+    setRegulatoryQuery(queryToUse);
+    setIsAnalyzingRegulatory(true);
+    const reqPayload = {
+      businessType: queryToUse,
+      businessName: userProfile?.business_name || `${queryToUse} Enterprise`,
+      location: userProfile?.location || 'Philippines',
+      category: 'Commercial',
+      startingBudget: userProfile?.budget || 'Micro-Enterprise',
+      registrationType: 'Sole Proprietorship',
+      isProductBased: true,
+    };
+
+    setSentJsonPayload(JSON.stringify(reqPayload, null, 2));
+
+    try {
+      const result = await analyzeBusinessRegulation(reqPayload);
+      setAnalyzedRegulatoryProfile(result);
+      setReceivedJsonPayload(JSON.stringify({
+        business_type: result.businessType,
+        primary_agency: result.primaryAgency,
+        agency_acronym: result.agencyAcronym,
+        license_name: result.licenseName,
+        legal_basis: result.legalBasis,
+        estimated_time: result.estimatedTime,
+        estimated_cost: result.estimatedCost,
+        focused_requirements: result.focusedRequirements,
+        legal_considerations: result.legalConsiderations,
+        mandatory_discounts_applicable: result.mandatoryDiscountsApplicable,
+        roadmap_task: result.roadmapTask,
+        source: result.source,
+      }, null, 2));
+    } catch (e) {
+      console.warn('Regulatory analysis failed:', e);
+    } finally {
+      setIsAnalyzingRegulatory(false);
+    }
+  };
+
+  const handleApplyRegulatoryToRoadmap = async () => {
+    if (!analyzedRegulatoryProfile) return;
+
+    const rt = analyzedRegulatoryProfile.roadmapTask;
+    const newTasks = [...tasks];
+    const existingIndex = newTasks.findIndex(
+      (t) =>
+        t.id === 'reg-license' ||
+        t.title.toLowerCase().includes(analyzedRegulatoryProfile.agencyAcronym.toLowerCase()) ||
+        t.title.toLowerCase().includes('fda') ||
+        t.title.toLowerCase().includes('potability') ||
+        t.title.toLowerCase().includes('pcab') ||
+        t.title.toLowerCase().includes('bai') ||
+        t.title.toLowerCase().includes('sanitary')
+    );
+
+    const updatedTask: RoadmapTask = {
+      id: existingIndex !== -1 ? newTasks[existingIndex].id : 'reg-license',
+      user_id: user?.uid || 'guest',
+      title: rt.title,
+      category: 'Permits',
+      status: 'Pending',
+      desc: rt.desc,
+      step_order: existingIndex !== -1 ? newTasks[existingIndex].step_order : 4,
+      agency: rt.agency,
+      legal_basis: rt.legal_basis,
+      estimated_time: rt.estimated_time,
+      estimated_cost: rt.estimated_cost,
+      required_docs: rt.required_docs,
+      sub_steps: rt.sub_steps,
+    };
+
+    if (existingIndex !== -1) {
+      newTasks[existingIndex] = updatedTask;
+    } else {
+      const mayorIdx = newTasks.findIndex((t) => t.title.toLowerCase().includes('mayor'));
+      const insertAt = mayorIdx !== -1 ? mayorIdx + 1 : Math.min(3, newTasks.length);
+      newTasks.splice(insertAt, 0, updatedTask);
+    }
+
+    const reordered = newTasks.map((t, idx) => ({ ...t, step_order: idx + 1 }));
+    setTasks(reordered);
+    setSavedRoadmaps((prev) =>
+      prev.map((r) =>
+        r.id === activeRoadmapId
+          ? { ...r, tasks: reordered, updatedAt: new Date().toISOString() }
+          : r
+      )
+    );
+    await syncActiveRoadmapTasks(activeRoadmapId, reordered);
+    if (user?.uid) {
+      await saveUserRoadmap(reordered);
+    }
+    setShowRegulatoryModal(false);
+    notify(
+      'Roadmap Updated!',
+      `Applied ${rt.title} with official ${analyzedRegulatoryProfile.agencyAcronym} compliance requirements and legal bases.`
+    );
+  };
+
+  // Load User Roadmap from Supabase, local cache or generate default with multi-roadmap support
+  const loadRoadmap = useCallback(async () => {
+    setLoading(true);
+    try {
+      const storedRoadmaps = await getSavedRoadmaps();
+      const meta = await getActiveRoadmapMeta();
+      let activeList = storedRoadmaps;
+      let activeRoadmap: UserSavedRoadmap | null = null;
+
+      if (activeList.length === 0) {
+        // First-time initialization: check cache, remote, or default
+        let loadedTasks: RoadmapTask[] = [];
+        try {
+          const localCached = await AsyncStorage.getItem('@likhora_active_roadmap_tasks');
+          if (localCached) {
+            const parsed = JSON.parse(localCached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              loadedTasks = parsed;
+            }
+          }
+        } catch (e) {
+          console.warn('Error reading @likhora_active_roadmap_tasks:', e);
+        }
+
+        if (loadedTasks.length === 0 && user?.uid) {
+          const { data } = await fetchUserRoadmap(user.uid);
+          if (data && data.length > 0) {
+            loadedTasks = data;
+          }
+        }
+
+        if (loadedTasks.length === 0) {
+          loadedTasks = getDefaultPhilippineRoadmapTasks(
+            user?.uid || 'guest',
+            userProfile?.business_type,
+            userProfile?.location
+          );
+        }
+
+        const hydrated = loadedTasks.map(ensureSubSteps);
+        const initialTitle =
+          userProfile?.business_name ||
+          (userProfile?.business_type ? `${userProfile.business_type} Venture` : 'My Business Venture');
+        const initialRoadmap: UserSavedRoadmap = {
+          id: 'main-journey',
+          title: initialTitle,
+          businessType: userProfile?.business_type,
+          location: userProfile?.location,
+          tasks: hydrated,
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        };
+
+        activeList = [initialRoadmap];
+        activeRoadmap = initialRoadmap;
+
+        await saveAllRoadmaps(activeList);
+        await setActiveRoadmapMeta(initialRoadmap.id, initialRoadmap.title);
+        await AsyncStorage.setItem('@likhora_active_roadmap_tasks', JSON.stringify(hydrated));
+      } else {
+        // We have existing saved roadmaps! Determine active one
+        if (meta.id) {
+          activeRoadmap = activeList.find((r) => r.id === meta.id) || null;
+        }
+        if (!activeRoadmap && activeList.length > 0) {
+          activeRoadmap = activeList[0];
+          await setActiveRoadmapMeta(activeRoadmap.id, activeRoadmap.title);
         }
       }
 
-      if (loadedTasks.length === 0) {
-        loadedTasks = getDefaultPhilippineRoadmapTasks(
-          user?.uid || 'guest', 
-          userProfile?.business_type, 
-          userProfile?.location
-        );
-      }
+      setSavedRoadmaps(activeList);
 
-      // Hydrate all tasks with rich legal basis & actionable sub-steps
-      const hydrated = loadedTasks.map(ensureSubSteps);
-      setTasks(hydrated);
-
-      if (user?.uid) {
-        await saveUserRoadmap(hydrated);
+      if (activeRoadmap) {
+        setActiveRoadmapId(activeRoadmap.id);
+        setActiveRoadmapTitle(activeRoadmap.title);
+        const hydrated = activeRoadmap.tasks.map(ensureSubSteps);
+        setTasks(hydrated);
+        await AsyncStorage.setItem('@likhora_active_roadmap_tasks', JSON.stringify(hydrated));
+        if (user?.uid) {
+          await saveUserRoadmap(hydrated);
+        }
       }
+    } catch (err) {
+      console.warn('Error during loadRoadmap:', err);
+    } finally {
       setLoading(false);
-    };
+    }
+  }, [user?.uid, userProfile?.business_name, userProfile?.business_type, userProfile?.location]);
 
-    loadRoadmap();
-  }, [user, userProfile]);
+  useEffect(() => {
+    void loadRoadmap();
+  }, [loadRoadmap]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadRoadmap();
+    }, [loadRoadmap])
+  );
 
   // Objective 4: contextual "what should I do next" guidance. Re-runs
   // whenever the completion pattern actually changes (not on every render),
@@ -311,7 +782,61 @@ export default function RoadmapTab() {
     });
 
     setTasks(updated);
-    await saveUserRoadmap(updated);
+    setSavedRoadmaps((prev) =>
+      prev.map((r) =>
+        r.id === activeRoadmapId
+          ? { ...r, tasks: updated, updatedAt: new Date().toISOString() }
+          : r
+      )
+    );
+    await syncActiveRoadmapTasks(activeRoadmapId, updated);
+    if (user?.uid) {
+      await saveUserRoadmap(updated);
+    }
+  };
+
+  // Toggle Skip Task Status (TS-08)
+  const toggleSkipTask = async (targetTask: RoadmapTask) => {
+    const isCurrentlySkipped = targetTask.status === 'Skipped';
+    const nextStatus = isCurrentlySkipped ? 'Pending' : 'Skipped';
+
+    const updated = tasks.map((rawTask) => {
+      const t = ensureSubSteps(rawTask);
+      const isTarget = Boolean(t.id && targetTask.id && t.id === targetTask.id) || t.title === targetTask.title;
+
+      if (isTarget) {
+        const updatedTask: RoadmapTask = {
+          ...t,
+          status: nextStatus,
+        };
+        if (selectedTaskModal && (selectedTaskModal.id === t.id || selectedTaskModal.title === t.title)) {
+          setSelectedTaskModal(updatedTask);
+        }
+        return updatedTask;
+      }
+      return t;
+    });
+
+    setTasks(updated);
+    setSavedRoadmaps((prev) =>
+      prev.map((r) =>
+        r.id === activeRoadmapId
+          ? { ...r, tasks: updated, updatedAt: new Date().toISOString() }
+          : r
+      )
+    );
+    await syncActiveRoadmapTasks(activeRoadmapId, updated);
+    if (user?.uid) {
+      await saveUserRoadmap(updated);
+    }
+
+    if (!isCurrentlySkipped) {
+      addNotification(
+        'Step Skipped',
+        `"${targetTask.title}" has been skipped. The next step is now unlocked.`,
+        'roadmap'
+      );
+    }
   };
 
   // Toggle Individual Sub-Step Completion Status
@@ -354,7 +879,17 @@ export default function RoadmapTab() {
     if (updatedModalTask) {
       setSelectedTaskModal(updatedModalTask);
     }
-    await saveUserRoadmap(updated);
+    setSavedRoadmaps((prev) =>
+      prev.map((r) =>
+        r.id === activeRoadmapId
+          ? { ...r, tasks: updated, updatedAt: new Date().toISOString() }
+          : r
+      )
+    );
+    await syncActiveRoadmapTasks(activeRoadmapId, updated);
+    if (user?.uid) {
+      await saveUserRoadmap(updated);
+    }
   };
 
   // Redirect to Khora AI Assistant Chat with pre-filled legal guidance query
@@ -371,41 +906,148 @@ export default function RoadmapTab() {
     });
   };
 
-  // Start Template Roadmap
-  const handleStartTemplate = async (templateName: string, templateTasks: Array<Omit<RoadmapTask, 'user_id'>>) => {
-    if (!user?.uid) return;
+  // Start or Resume Template Roadmap (Preserves all previous roadmaps)
+  const handleStartTemplate = async (
+    templateName: string,
+    templateTasks: Array<Omit<RoadmapTask, 'user_id'>>
+  ) => {
+    const uid = user?.uid || 'guest';
 
-    const newTasks: RoadmapTask[] = templateTasks.map((t, idx) => ensureSubSteps({
-      ...t,
-      user_id: user.uid,
-      id: `${Date.now()}-${idx}`,
-      step_order: idx + 1,
-    }));
+    // 1. Check if user already started this template!
+    const existing = savedRoadmaps.find(
+      (r) =>
+        r.title.toLowerCase() === templateName.toLowerCase() ||
+        r.templateId === templateName
+    );
 
+    if (existing) {
+      await handleSwitchRoadmap(existing.id);
+      notify(
+        'Roadmap Resumed',
+        `Switched back to your saved "${existing.title}". All your progress has been restored!`
+      );
+      return;
+    }
+
+    // 2. Snapshot current active tasks into savedRoadmaps first so current journey is never lost
+    let currentList = savedRoadmaps;
+    if (activeRoadmapId && tasks.length > 0) {
+      currentList = currentList.map((r) =>
+        r.id === activeRoadmapId
+          ? { ...r, tasks, updatedAt: new Date().toISOString() }
+          : r
+      );
+    }
+
+    // 3. Prepare new tasks for the template
+    const newTasks: RoadmapTask[] = templateTasks.map((t, idx) =>
+      ensureSubSteps({
+        ...t,
+        user_id: uid,
+        id: `task-${Date.now()}-${idx}`,
+        step_order: idx + 1,
+        status: 'Pending',
+      })
+    );
+
+    const newRoadmapId = `template-${Date.now()}`;
+    const newRoadmap: UserSavedRoadmap = {
+      id: newRoadmapId,
+      title: templateName,
+      templateId: templateName,
+      tasks: newTasks,
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedRoadmaps = [newRoadmap, ...currentList];
+    setSavedRoadmaps(updatedRoadmaps);
+    setActiveRoadmapId(newRoadmapId);
+    setActiveRoadmapTitle(templateName);
     setTasks(newTasks);
-    await saveUserRoadmap(newTasks);
-    setShowTemplates(false);
 
-    notify('New Roadmap Started', `Your active plan is now "${templateName}". Its Philippine legal steps are loaded.`);
+    await saveAllRoadmaps(updatedRoadmaps);
+    await setActiveRoadmapMeta(newRoadmapId, templateName);
+    await AsyncStorage.setItem('@likhora_active_roadmap_tasks', JSON.stringify(newTasks));
+
+    if (user?.uid) {
+      await saveUserRoadmap(newTasks);
+    }
+
+    setShowTemplates(false);
+    notify(
+      'New Roadmap Started! 🚀',
+      `"${templateName}" is now your active journey. Your previous roadmap has been saved and can be resumed anytime from Templates!`
+    );
   };
 
-  // Calculate Progress
-  const completedCount = tasks.filter((t) => t.status === 'Completed').length;
-  const progressPercent = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+  // Switch to another saved roadmap
+  const handleSwitchRoadmap = async (targetId: string) => {
+    const result = await switchRoadmap(targetId, tasks, activeRoadmapId);
+    if (result.activeRoadmap) {
+      const hydrated = result.activeRoadmap.tasks.map(ensureSubSteps);
+      setTasks(hydrated);
+      setActiveRoadmapId(result.activeRoadmap.id);
+      setActiveRoadmapTitle(result.activeRoadmap.title);
+      setSavedRoadmaps(result.allRoadmaps);
+      if (user?.uid) {
+        await saveUserRoadmap(hydrated);
+      }
+      setShowTemplates(false);
+      notify(
+        'Roadmap Switched',
+        `Now viewing "${result.activeRoadmap.title}". Continue where you left off!`
+      );
+    }
+  };
 
-  // Guided, sequential ordering: steps unlock one at a time. `activeStepIndex`
-  // is the first not-yet-completed step in order — the one the user should
-  // be working on right now. Anything before it is done; anything after it
-  // is locked until this one is completed.
+  // Remove a saved roadmap
+  const handleDeleteRoadmap = (roadmapToDelete: UserSavedRoadmap) => {
+    if (savedRoadmaps.length <= 1) {
+      Alert.alert('Cannot Remove', 'You must have at least one active roadmap.');
+      return;
+    }
+
+    Alert.alert(
+      'Remove Roadmap?',
+      `Are you sure you want to remove "${roadmapToDelete.title}"? Your progress on this specific roadmap will be deleted.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const { newActive, remaining } = await deleteSavedRoadmap(roadmapToDelete.id, activeRoadmapId);
+            setSavedRoadmaps(remaining);
+            if (newActive) {
+              setActiveRoadmapId(newActive.id);
+              setActiveRoadmapTitle(newActive.title);
+              const hydrated = newActive.tasks.map(ensureSubSteps);
+              setTasks(hydrated);
+              if (user?.uid) {
+                await saveUserRoadmap(hydrated);
+              }
+            }
+            notify('Roadmap Removed', `"${roadmapToDelete.title}" was removed.`);
+          },
+        },
+      ]
+    );
+  };
+
+  // Calculate Progress (Skipped tasks excluded from required denominator)
+  const completedCount = tasks.filter((t) => t.status === 'Completed').length;
+  const skippedCount = tasks.filter((t) => t.status === 'Skipped').length;
+  const effectiveTotal = Math.max(tasks.length - skippedCount, 0);
+  const progressPercent = effectiveTotal > 0 ? Math.round((completedCount / effectiveTotal) * 100) : (tasks.length > 0 && completedCount > 0 ? 100 : 0);
+
+  // Guided, sequential ordering: `activeStepIndex` is the first pending step
   const orderedTasks = [...tasks].sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0));
-  const activeStepIndex = orderedTasks.findIndex((t) => t.status !== 'Completed');
+  const activeStepIndex = orderedTasks.findIndex((t) => t.status !== 'Completed' && t.status !== 'Skipped');
   const currentStepTitle = activeStepIndex >= 0 ? orderedTasks[activeStepIndex].title : null;
 
-  const isTaskLocked = (task: RoadmapTask): boolean => {
-    if (task.status === 'Completed' || activeStepIndex === -1) return false;
-    const activeOrder = orderedTasks[activeStepIndex]?.step_order ?? 0;
-    return (task.step_order ?? 0) > activeOrder;
-  };
+  // All steps are unlocked and accessible
+  const isTaskLocked = (_task: RoadmapTask): boolean => false;
 
   // Template Library
   const visibleTemplates = filterTemplates(STARTUP_TEMPLATES, templateSearch, templateCategory);
@@ -431,75 +1073,19 @@ export default function RoadmapTab() {
 
           {/* Title Row directly below */}
           <View style={styles.headerTitleRow}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={styles.headerTitle}>Roadmap</Text>
-              <View style={styles.headerMetaRow}>
-                <Store size={12} color={LikhoraColors.primary} style={{ marginRight: 4 }} />
-                <Text style={styles.headerMetaText} numberOfLines={1}>
-                  {userProfile?.business_name || 'My Business'} • {userProfile?.location || 'Philippines'}
-                </Text>
+              <View style={styles.progressPill}>
+                <Text style={styles.progressPillText}>{progressPercent}% Done</Text>
               </View>
             </View>
-
-            <View style={styles.progressPill}>
-              <Text style={styles.progressPillText}>{progressPercent}% Done</Text>
-            </View>
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {activeRoadmapTitle || userProfile?.business_name || 'My Business'} • {userProfile?.location || 'Philippines'}
+            </Text>
           </View>
         </View>
 
-        {/* Overall Progress Bar */}
-        <View style={styles.progressBarTrack}>
-          <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
-        </View>
-
-        {/* Next Step Card (Objective 4: progress monitoring + AI guidance) */}
-        {nextStep && !nextStep.allComplete && nextStep.task && (
-          <TouchableOpacity
-            style={styles.nextStepCard}
-            activeOpacity={0.85}
-            onPress={() => setSelectedTaskModal(nextStep.task)}
-          >
-            <View style={styles.nextStepIconWrap}>
-              <Sparkles size={16} color="#FFFFFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextStepLabel}>Next Step</Text>
-              <Text style={styles.nextStepTitle}>{nextStep.task.title}</Text>
-              <Text style={styles.nextStepReason}>{nextStep.reason}</Text>
-            </View>
-            <ArrowRight size={18} color={LikhoraColors.primary} />
-          </TouchableOpacity>
-        )}
-        {nextStep && nextStep.allComplete && (
-          <TouchableOpacity
-            style={[styles.nextStepCard, styles.nextStepCardDone]}
-            activeOpacity={0.85}
-            onPress={() => router.push('/business-portfolio')}
-          >
-            <View style={[styles.nextStepIconWrap, styles.nextStepIconWrapDone]}>
-              <CheckCircle2 size={16} color="#FFFFFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextStepLabel}>All Steps Completed</Text>
-              <Text style={styles.nextStepReason}>
-                Great work! Tap to compile your Business Portfolio from everything you've built.
-              </Text>
-            </View>
-            <ArrowRight size={18} color={LikhoraColors.successGreen} />
-          </TouchableOpacity>
-        )}
-
-        <View style={styles.templateActionsRow}>
-          <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
-            <Plus size={16} color="#FFFFFF" />
-            <Text style={styles.customTaskButtonText}>Create your own template</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.myTemplatesButton} onPress={() => router.push('/my-templates')} activeOpacity={0.8}>
-            <Bookmark size={16} color={LikhoraColors.primary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* 2. SEGMENTED CONTROL & CATEGORY FILTERS */}
+        {/* 2. SEGMENTED CONTROL: My Journey | Templates (Cleanly anchored under Header) */}
         <View style={styles.segmentedControlContainer}>
           <TouchableOpacity
             style={[styles.segmentBtn, !showTemplates && styles.segmentBtnActive]}
@@ -525,6 +1111,35 @@ export default function RoadmapTab() {
         {/* 3. TEMPLATE EXPLORER OR TASK LIST */}
         {showTemplates ? (
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {/* Template Actions Row */}
+            <View style={styles.templateActionsRow}>
+              <TouchableOpacity style={styles.customTaskButton} onPress={() => router.push('/template-builder')} activeOpacity={0.8}>
+                <Plus size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.customTaskButtonText}>Create your own template</Text>
+              </TouchableOpacity>
+
+              {/* My Roadmaps Icon Button */}
+              <TouchableOpacity
+                style={styles.myRoadmapsIconButton}
+                onPress={() => setShowMyRoadmapsModal(true)}
+                activeOpacity={0.8}
+                accessibilityLabel="My Roadmaps"
+              >
+                <FolderKanban size={18} color={LikhoraColors.primary} />
+                {savedRoadmaps.length > 0 && (
+                  <View style={styles.myRoadmapsBadgeDot}>
+                    <Text style={styles.myRoadmapsBadgeDotText}>{savedRoadmaps.length}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Saved Templates Bookmark Button */}
+              <TouchableOpacity style={styles.myTemplatesButton} onPress={() => router.push('/my-templates')} activeOpacity={0.8}>
+                <Bookmark size={18} color={LikhoraColors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Catalogue Section Header directly below action row */}
             <Text style={styles.sectionHeaderTitle}>Startup Roadmap Templates</Text>
             <Text style={styles.sectionSubTitle}>
               Ready-made launch plans built on real Philippine legal and business requirements — for
@@ -601,6 +1216,14 @@ export default function RoadmapTab() {
             ) : (
               visibleTemplates.map((tmpl) => {
                 const Icon = TEMPLATE_ICONS[tmpl.icon];
+                const matchingSaved = savedRoadmaps.find(
+                  (r) =>
+                    r.title.toLowerCase() === tmpl.title.toLowerCase() ||
+                    r.templateId === tmpl.title
+                );
+                const isAlreadyStarted = Boolean(matchingSaved);
+                const isCurrentlyActive = matchingSaved?.id === activeRoadmapId;
+
                 return (
                   <View key={tmpl.id} style={styles.templateCard}>
                     {/* A photo when one is bundled, otherwise an accent banner —
@@ -622,21 +1245,51 @@ export default function RoadmapTab() {
                             {tmpl.budget} • {tmpl.tasks.length} steps
                           </Text>
                         </View>
-                        <View style={styles.templateBadge}>
-                          <Bookmark size={14} color={LikhoraColors.primary} />
-                        </View>
+                        {isCurrentlyActive ? (
+                          <View style={styles.activePillBadge}>
+                            <Text style={styles.activePillBadgeText}>Active</Text>
+                          </View>
+                        ) : isAlreadyStarted ? (
+                          <View style={styles.inProgressPillBadge}>
+                            <Text style={styles.inProgressPillBadgeText}>In Progress</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.templateBadge}>
+                            <Bookmark size={14} color={LikhoraColors.primary} />
+                          </View>
+                        )}
                       </View>
 
                       <Text style={styles.templateDesc}>{tmpl.desc}</Text>
 
-                      <TouchableOpacity
-                        style={styles.startTemplateBtn}
-                        onPress={() => handleStartTemplate(tmpl.title, tmpl.tasks)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.startTemplateBtnText}>Start This Roadmap</Text>
-                        <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
-                      </TouchableOpacity>
+                      {isCurrentlyActive ? (
+                        <TouchableOpacity
+                          style={styles.startTemplateBtn}
+                          onPress={() => setShowTemplates(false)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.startTemplateBtnText}>Continue Active Journey</Text>
+                          <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+                      ) : isAlreadyStarted && matchingSaved ? (
+                        <TouchableOpacity
+                          style={[styles.startTemplateBtn, { backgroundColor: '#5B2256' }]}
+                          onPress={() => handleSwitchRoadmap(matchingSaved.id)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.startTemplateBtnText}>Resume Saved Roadmap</Text>
+                          <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.startTemplateBtn}
+                          onPress={() => handleStartTemplate(tmpl.title, tmpl.tasks)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.startTemplateBtnText}>Start This Roadmap</Text>
+                          <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
                 );
@@ -650,7 +1303,11 @@ export default function RoadmapTab() {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            
+            {/* Overall Progress Bar */}
+            <View style={styles.progressBarTrack}>
+              <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+            </View>
+
             {/* If 100% Completed, Show Completion Banner */}
             {progressPercent === 100 && (
               <View style={styles.completionBanner}>
@@ -658,30 +1315,81 @@ export default function RoadmapTab() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.completionTitle}>Roadmap Completed! 🎉</Text>
                   <Text style={styles.completionSub}>
-                    Congratulations on completing your legal business launch checklist! Explore other startup templates below to expand.
+                    Congratulations on completing your legal business launch checklist! Tap to compile your Business Portfolio from everything you've built.
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={styles.exploreBannerBtn}
-                  onPress={() => setShowTemplates(true)}
+                  onPress={() => router.push('/business-portfolio')}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.exploreBannerBtnText}>Explore Templates</Text>
+                  <Text style={styles.exploreBannerBtnText}>View Portfolio</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Guided step-by-step journey: one focused step at a time.
-                Completed steps sit above, collapsed; upcoming steps stay
-                locked and collapsed below, so nothing overwhelming is on
-                screen at once. */}
+            {/* Objective 4 / TC_PROGRESS_001: Next Step Recommendation Card */}
+            {nextStep && !nextStep.allComplete && nextStep.task && progressPercent < 100 && (
+              <TouchableOpacity
+                style={styles.nextStepAiCard}
+                onPress={() => setSelectedTaskModal(nextStep.task)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.nextStepAiHeader}>
+                  <Sparkles size={14} color={LikhoraColors.aiBlue} style={{ marginRight: 6 }} />
+                  <Text style={styles.nextStepAiTitle}>Khora AI • Recommended Next Step</Text>
+                  {nextStep.source === 'khora-ai' && (
+                    <View style={styles.liveAiBadge}>
+                      <Text style={styles.liveAiBadgeText}>AI Guidance</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.nextStepTaskTitle}>{nextStep.task.title}</Text>
+                {Boolean(nextStep.reason) && (
+                  <Text style={styles.nextStepReasonText}>{nextStep.reason}</Text>
+                )}
+                <View style={styles.nextStepActionRow}>
+                  <Text style={styles.nextStepActionText}>View task requirements & checklist</Text>
+                  <ArrowRight size={13} color={LikhoraColors.primary} style={{ marginLeft: 4 }} />
+                </View>
+              </TouchableOpacity>
+            )}
+
+            {/* Phase 3: AI Philippine Regulatory & Legal Compliance Advisor Banner */}
+            <TouchableOpacity
+              style={styles.regulatoryBannerCard}
+              onPress={() => handleOpenRegulatoryAdvisor()}
+              activeOpacity={0.85}
+            >
+              <View style={styles.regulatoryBannerIcon}>
+                <Scale size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <View style={styles.regulatoryBadgeRow}>
+                  <Text style={styles.regulatoryBadgeText}>PHILIPPINE REGULATORY AI</Text>
+                  <View style={styles.govVerifiedPill}>
+                    <ShieldCheck size={11} color={LikhoraColors.successGreen} style={{ marginRight: 3 }} />
+                    <Text style={styles.govVerifiedText}>gov.ph verified</Text>
+                  </View>
+                </View>
+                <Text style={styles.regulatoryBannerTitle}>
+                  Industry Permits & Legal Protections
+                </Text>
+                <Text style={styles.regulatoryBannerSub} numberOfLines={1}>
+                  FDA, DOH, BAI, PCAB • Senior/PWD 20% discounts • Price Tag Law
+                </Text>
+              </View>
+              <ArrowRight size={18} color={LikhoraColors.primary} style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
+
+            {/* Guided step-by-step journey: all steps unlocked and accessible */}
             <View style={styles.stepperContainer}>
               {orderedTasks.map((rawTask, idx) => {
                 const task = ensureSubSteps(rawTask);
                 const taskIdKey = task.id || task.title || `task-${idx}`;
                 const isCompleted = task.status === 'Completed';
+                const isSkipped = task.status === 'Skipped';
                 const isActive = idx === activeStepIndex;
-                const isLocked = isTaskLocked(task);
                 const isLast = idx === orderedTasks.length - 1;
 
                 const subSteps = task.sub_steps || [];
@@ -696,19 +1404,22 @@ export default function RoadmapTab() {
                         style={[
                           styles.stepDot,
                           isCompleted && styles.stepDotCompleted,
+                          isSkipped && styles.stepDotSkipped,
                           isActive && styles.stepDotActive,
                         ]}
                       >
                         {isCompleted ? (
                           <Check size={14} color="#FFFFFF" strokeWidth={3} />
-                        ) : isLocked ? (
-                          <Lock size={12} color={LikhoraColors.textPlaceholder} />
+                        ) : isSkipped ? (
+                          <SkipForward size={12} color="#FFFFFF" />
                         ) : (
-                          <Text style={styles.stepDotNumber}>{task.step_order || idx + 1}</Text>
+                          <Text style={[styles.stepDotNumber, isActive && styles.stepDotNumberActive]}>
+                            {task.step_order || idx + 1}
+                          </Text>
                         )}
                       </View>
                       {!isLast && (
-                        <View style={[styles.stepConnectorLine, isCompleted && styles.stepConnectorLineDone]} />
+                        <View style={[styles.stepConnectorLine, (isCompleted || isSkipped) && styles.stepConnectorLineDone]} />
                       )}
                     </View>
 
@@ -759,25 +1470,46 @@ export default function RoadmapTab() {
                         </TouchableOpacity>
                       ) : (
                         <TouchableOpacity
-                          style={[styles.compactStepRow, isLocked && styles.compactStepRowLocked]}
+                          style={[
+                            styles.compactStepRow,
+                            isCompleted && styles.compactStepRowCompleted,
+                            isSkipped && styles.compactStepRowSkipped,
+                          ]}
                           onPress={() => setSelectedTaskModal(task)}
                           activeOpacity={0.75}
                         >
-                          <Text
-                            style={[
-                              styles.compactStepTitle,
-                              isCompleted && styles.compactStepTitleCompleted,
-                              isLocked && styles.compactStepTitleLocked,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {task.title}
-                          </Text>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text
+                              style={[
+                                styles.compactStepTitle,
+                                isCompleted && styles.compactStepTitleCompleted,
+                                isSkipped && styles.compactStepTitleSkipped,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {task.title}
+                            </Text>
+                            {task.agency ? (
+                              <Text style={styles.compactStepSubtitle} numberOfLines={1}>
+                                {task.agency} {task.estimated_time ? `• ${task.estimated_time}` : ''}
+                              </Text>
+                            ) : null}
+                          </View>
                           {isCompleted ? (
-                            <Text style={styles.compactStepTagDone}>Done</Text>
-                          ) : isLocked ? (
-                            <Text style={styles.compactStepTagLocked}>Locked</Text>
-                          ) : null}
+                            <View style={styles.doneBadgePill}>
+                              <Check size={11} color="#059669" strokeWidth={3} style={{ marginRight: 3 }} />
+                              <Text style={styles.compactStepTagDone}>Done</Text>
+                            </View>
+                          ) : isSkipped ? (
+                            <View style={styles.skippedBadgePill}>
+                              <Text style={styles.compactStepTagSkipped}>Skipped</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.openStepBadgePill}>
+                              <Text style={styles.compactStepTagOpen}>Open</Text>
+                              <ArrowRight size={11} color={LikhoraColors.primary} style={{ marginLeft: 3 }} />
+                            </View>
+                          )}
                         </TouchableOpacity>
                       )}
                     </View>
@@ -791,9 +1523,7 @@ export default function RoadmapTab() {
         {/* ------------------------------------------------------------------ */}
         {/* REAL LEGAL PROCESS POP-UP MODAL WINDOW                             */}
         {/* ------------------------------------------------------------------ */}
-        {selectedTaskModal && (() => {
-          const isModalTaskLocked = isTaskLocked(selectedTaskModal);
-          return (
+        {selectedTaskModal && (
           <Modal
             visible={Boolean(selectedTaskModal)}
             animationType="slide"
@@ -811,6 +1541,16 @@ export default function RoadmapTab() {
                         <Text style={styles.categoryBadgeText}>{selectedTaskModal.category}</Text>
                       </View>
                       <Text style={styles.popupStepOrder}>Step {selectedTaskModal.step_order || 1}</Text>
+                      {selectedTaskModal.status === 'Skipped' && (
+                        <View style={styles.skippedBadge}>
+                          <Text style={styles.skippedBadgeText}>Skipped</Text>
+                        </View>
+                      )}
+                      {selectedTaskModal.status === 'Completed' && (
+                        <View style={styles.completedBadge}>
+                          <Text style={styles.completedBadgeText}>Completed</Text>
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.popupTitle}>{selectedTaskModal.title}</Text>
                   </View>
@@ -827,13 +1567,21 @@ export default function RoadmapTab() {
 
                 <ScrollView contentContainerStyle={styles.popupScrollBody} showsVerticalScrollIndicator={false}>
 
-                  {/* Locked-step preview notice */}
-                  {isModalTaskLocked && (
-                    <View style={styles.lockedBanner}>
-                      <Lock size={16} color={LikhoraColors.textSecondary} style={{ marginRight: 8 }} />
-                      <Text style={styles.lockedBannerText}>
-                        This is a preview. Finish “{currentStepTitle}” first to unlock and complete this step.
-                      </Text>
+                  {/* Beginner Guidance & Tips (TC_ROADMAP_001 & TC_SDG_001) */}
+                  {selectedTaskModal.tips && selectedTaskModal.tips.length > 0 && (
+                    <View style={styles.tipsBanner}>
+                      <View style={styles.tipsHeaderRow}>
+                        <Lightbulb size={16} color="#D97706" style={{ marginRight: 6 }} />
+                        <Text style={styles.tipsTitle}>
+                          {userProfile?.experience_level === 'First-time entrepreneur' ? 'Beginner Guidance & Tips' : 'Practical Tips'}
+                        </Text>
+                      </View>
+                      {selectedTaskModal.tips.map((tip, tIdx) => (
+                        <View key={tIdx} style={styles.tipItemRow}>
+                          <Text style={styles.tipBullet}>•</Text>
+                          <Text style={styles.tipText}>{tip}</Text>
+                        </View>
+                      ))}
                     </View>
                   )}
 
@@ -906,11 +1654,9 @@ export default function RoadmapTab() {
                         style={[
                           styles.popupSubStepRow,
                           sub.completed && styles.popupSubStepRowCompleted,
-                          isModalTaskLocked && styles.popupSubStepRowLocked,
                         ]}
-                        onPress={() => !isModalTaskLocked && toggleSubStep(selectedTaskModal, sub.id)}
-                        activeOpacity={isModalTaskLocked ? 1 : 0.7}
-                        disabled={isModalTaskLocked}
+                        onPress={() => toggleSubStep(selectedTaskModal, sub.id)}
+                        activeOpacity={0.7}
                       >
                         <View style={styles.popupCheckIcon}>
                           {sub.completed ? (
@@ -924,7 +1670,6 @@ export default function RoadmapTab() {
                           style={[
                             styles.popupSubStepText,
                             sub.completed && styles.popupSubStepTextCompleted,
-                            isModalTaskLocked && styles.popupSubStepTextLocked,
                           ]}
                         >
                           {sub.title}
@@ -960,12 +1705,7 @@ export default function RoadmapTab() {
 
                 {/* Popup Footer Buttons */}
                 <View style={styles.popupFooter}>
-                  {isModalTaskLocked ? (
-                    <View style={styles.lockedFooterHint}>
-                      <Lock size={14} color={LikhoraColors.textSecondary} style={{ marginRight: 6 }} />
-                      <Text style={styles.lockedFooterHintText}>Complete the current step to unlock this one</Text>
-                    </View>
-                  ) : (
+                  <View style={styles.popupFooterActions}>
                     <TouchableOpacity
                       style={[
                         styles.toggleCompleteBtn,
@@ -979,7 +1719,26 @@ export default function RoadmapTab() {
                         {selectedTaskModal.status === 'Completed' ? 'Step Completed ✓' : 'Mark Entire Step Complete'}
                       </Text>
                     </TouchableOpacity>
-                  )}
+
+                    <TouchableOpacity
+                      style={[
+                        styles.toggleSkipBtn,
+                        selectedTaskModal.status === 'Skipped' && styles.toggleSkipBtnActive
+                      ]}
+                      onPress={() => toggleSkipTask(selectedTaskModal)}
+                      activeOpacity={0.85}
+                    >
+                      <SkipForward size={14} color={selectedTaskModal.status === 'Skipped' ? '#B45309' : LikhoraColors.textSecondary} style={{ marginRight: 6 }} />
+                      <Text
+                        style={[
+                          styles.toggleSkipBtnText,
+                          selectedTaskModal.status === 'Skipped' && styles.toggleSkipBtnTextActive
+                        ]}
+                      >
+                        {selectedTaskModal.status === 'Skipped' ? 'Unskip Step (Restore)' : 'Skip This Step'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
                   <TouchableOpacity
                     style={styles.closeDoneBtn}
@@ -993,8 +1752,457 @@ export default function RoadmapTab() {
               </View>
             </View>
           </Modal>
-          );
-        })()}
+        )}
+
+        {/* ------------------------------------------------------------------ */}
+        {/* PHILIPPINE REGULATORY & LEGAL COMPLIANCE ADVISOR MODAL (PHASE 3)    */}
+        {/* ------------------------------------------------------------------ */}
+        <Modal
+          visible={showRegulatoryModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowRegulatoryModal(false)}
+        >
+          <View style={styles.popupOverlay}>
+            <View style={[styles.popupContainer, { maxHeight: '92%' }]}>
+              {/* Header */}
+              <View style={styles.regModalHeader}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <View style={styles.regHeaderPillRow}>
+                    <View style={styles.regGovTag}>
+                      <ShieldCheck size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+                      <Text style={styles.regGovTagText}>GOV.PH ARCHITECTED</Text>
+                    </View>
+                    <View style={styles.regAiPill}>
+                      <Sparkles size={11} color={LikhoraColors.aiBlue} style={{ marginRight: 3 }} />
+                      <Text style={styles.regAiPillText}>Khora AI Engine</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.regModalTitle}>Philippine Regulatory & Legal Hub</Text>
+                  <Text style={styles.regModalSub}>
+                    Dynamic compliance & legal framework for any Philippine business venture.
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.closePopupBtn}
+                  onPress={() => setShowRegulatoryModal(false)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={22} color={LikhoraColors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                contentContainerStyle={styles.regScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* 1. Interactive Business Search & Quick Chips */}
+                <View style={styles.regSearchSection}>
+                  <Text style={styles.regSectionHeader}>TEST ANY BUSINESS TYPE</Text>
+                  <Text style={styles.regSectionSub}>
+                    Select an industry chip or type any custom business to simulate search across gov.ph portals:
+                  </Text>
+
+                  {/* Quick Chips */}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.regChipsRow}
+                  >
+                    {[
+                      { label: '💊 Pharmacy (FDA)', query: 'Pharmacy' },
+                      { label: '💧 Water Refilling (DOH)', query: 'Water Refilling Station' },
+                      { label: '🍲 Food Service (DOH)', query: 'Food Service / Carinderia' },
+                      { label: '🐾 Pet Clinic (BAI)', query: 'Veterinary Clinic & Pet Grooming' },
+                      { label: '🏗️ Contractor (PCAB)', query: 'Construction & Trade Contractor' },
+                      { label: '🛒 Micro Retail (BMBE)', query: 'General Retail & Sari-Sari Store' },
+                    ].map((item, idx) => {
+                      const isSelected = regulatoryQuery.toLowerCase().includes(item.query.toLowerCase().split(' ')[0]);
+                      return (
+                        <TouchableOpacity
+                          key={idx}
+                          style={[styles.regChip, isSelected && styles.regChipActive]}
+                          onPress={() => handleAnalyzeRegulatoryQuery(item.query)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.regChipText, isSelected && styles.regChipTextActive]}>
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {/* Search Input Bar */}
+                  <View style={styles.regInputRow}>
+                    <View style={styles.regInputWrap}>
+                      <Search size={16} color={LikhoraColors.textPlaceholder} style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={styles.regTextInput}
+                        placeholder="Type any business (e.g. Laundry, Salon, Bakery)..."
+                        placeholderTextColor={LikhoraColors.textPlaceholder}
+                        value={regulatoryQuery}
+                        onChangeText={setRegulatoryQuery}
+                        onSubmitEditing={() => handleAnalyzeRegulatoryQuery()}
+                        returnKeyType="search"
+                      />
+                      {regulatoryQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setRegulatoryQuery('')} hitSlop={8}>
+                          <X size={14} color={LikhoraColors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.regSearchBtn}
+                      onPress={() => handleAnalyzeRegulatoryQuery()}
+                      disabled={isAnalyzingRegulatory}
+                      activeOpacity={0.8}
+                    >
+                      {isAnalyzingRegulatory ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.regSearchBtnText}>Search gov.ph</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* 2. Loading State Animation */}
+                {isAnalyzingRegulatory && (
+                  <View style={styles.regLoadingBox}>
+                    <ActivityIndicator size="large" color={LikhoraColors.primary} style={{ marginBottom: 10 }} />
+                    <Text style={styles.regLoadingTitle}>Simulating Search on Official gov.ph Portals...</Text>
+                    <Text style={styles.regLoadingText}>
+                      Querying fda.gov.ph, doh.gov.ph, bai.da.gov.ph, ciap.dti.gov.ph...
+                    </Text>
+                    <Text style={styles.regLoadingSub}>
+                      Formulating focused operational requirements & statutory legal considerations.
+                    </Text>
+                  </View>
+                )}
+
+                {/* 3. Regulatory Profile Results */}
+                {!isAnalyzingRegulatory && analyzedRegulatoryProfile && (
+                  <>
+                    {/* Primary Regulatory License Hero Card */}
+                    <View style={styles.regHeroCard}>
+                      <View style={styles.regHeroTopRow}>
+                        <View style={styles.regAgencyBadge}>
+                          <Text style={styles.regAgencyBadgeText}>
+                            {analyzedRegulatoryProfile.agencyAcronym}
+                          </Text>
+                        </View>
+                        <View style={styles.regSourceTag}>
+                          <Text style={styles.regSourceTagText}>
+                            {analyzedRegulatoryProfile.source === 'khora-ai' ? 'Search-Architected AI' : 'Deterministic Registry'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.regLicenseName}>
+                        {analyzedRegulatoryProfile.licenseName}
+                      </Text>
+                      <Text style={styles.regPrimaryAgency}>
+                        Issuing Agency: {analyzedRegulatoryProfile.primaryAgency}
+                      </Text>
+
+                      <View style={styles.regLegalBasisBox}>
+                        <Scale size={15} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
+                        <Text style={styles.regLegalBasisText} numberOfLines={2}>
+                          {analyzedRegulatoryProfile.legalBasis}
+                        </Text>
+                      </View>
+
+                      <View style={styles.regSpecsRow}>
+                        <View style={styles.regSpecItem}>
+                          <Clock size={14} color={LikhoraColors.aiBlue} style={{ marginRight: 5 }} />
+                          <Text style={styles.regSpecText}>{analyzedRegulatoryProfile.estimatedTime}</Text>
+                        </View>
+                        <View style={styles.regSpecItem}>
+                          <Coins size={14} color={LikhoraColors.successGreen} style={{ marginRight: 5 }} />
+                          <Text style={styles.regSpecText}>{analyzedRegulatoryProfile.estimatedCost}</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Sharply Focused Requirements Section */}
+                    <View style={styles.regSectionCard}>
+                      <View style={styles.regCardHeaderRow}>
+                        <ShieldCheck size={18} color={LikhoraColors.primary} style={{ marginRight: 8 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.regCardHeaderTitle}>Sharply Focused Requirements</Text>
+                          <Text style={styles.regCardHeaderSub}>
+                            Technical, equipment, personnel, and logbook criteria:
+                          </Text>
+                        </View>
+                      </View>
+
+                      {analyzedRegulatoryProfile.focusedRequirements.map((req, rIdx) => (
+                        <View key={rIdx} style={styles.regReqItem}>
+                          <View style={styles.regReqHeader}>
+                            <View style={styles.regReqDot} />
+                            <Text style={styles.regReqTitle}>{req.title}</Text>
+                            {req.isMandatory && (
+                              <View style={styles.mandatoryPill}>
+                                <Text style={styles.mandatoryPillText}>MANDATORY</Text>
+                              </View>
+                            )}
+                            {req.documentCode && (
+                              <View style={styles.docCodePill}>
+                                <Text style={styles.docCodePillText}>{req.documentCode}</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.regReqDesc}>{req.description}</Text>
+                        </View>
+                      ))}
+                    </View>
+
+                    {/* Statutory Philippine Legal Considerations */}
+                    <View style={styles.regSectionCard}>
+                      <View style={styles.regCardHeaderRow}>
+                        <Scale size={18} color="#D97706" style={{ marginRight: 8 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.regCardHeaderTitle}>Statutory Legal Protections & Liabilities</Text>
+                          <Text style={styles.regCardHeaderSub}>
+                            Mandatory Philippine laws, statutory discounts, and price controls:
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Mandatory Discounts Box */}
+                      {analyzedRegulatoryProfile.mandatoryDiscountsApplicable.length > 0 && (
+                        <View style={styles.discountHighlightBox}>
+                          <Text style={styles.discountHighlightTitle}>
+                            MANDATORY STATUTORY DISCOUNTS & PRICE DISPLAY
+                          </Text>
+                          {analyzedRegulatoryProfile.mandatoryDiscountsApplicable.map((disc, dIdx) => (
+                            <View key={dIdx} style={styles.discountRow}>
+                              <CheckCircle2 size={13} color={LikhoraColors.successGreen} style={{ marginRight: 6 }} />
+                              <Text style={styles.discountText}>{disc}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Legal Considerations Cards */}
+                      {analyzedRegulatoryProfile.legalConsiderations.map((leg, lIdx) => (
+                        <View key={lIdx} style={styles.legalItemCard}>
+                          <View style={styles.legalItemTop}>
+                            <Text style={styles.legalItemTitle}>{leg.title}</Text>
+                            <View style={styles.lawCodeBadge}>
+                              <Text style={styles.lawCodeBadgeText}>{leg.law}</Text>
+                            </View>
+                          </View>
+                          <Text style={styles.legalItemSummary}>{leg.summary}</Text>
+                          <View style={styles.liabilityBox}>
+                            <AlertTriangle size={13} color="#B45309" style={{ marginRight: 5, marginTop: 1 }} />
+                            <Text style={styles.liabilityText}>
+                              <Text style={{ fontWeight: '800' }}>Liability: </Text>
+                              {leg.penaltyOrLiability}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+
+                    {/* JSON Exchange Inspector ("Everytime user json file to ai and ai five to user") */}
+                    <View style={styles.jsonSectionCard}>
+                      <TouchableOpacity
+                        style={styles.jsonToggleBtn}
+                        onPress={() => setShowJsonExchange(!showJsonExchange)}
+                        activeOpacity={0.8}
+                      >
+                        <Code size={16} color={LikhoraColors.primary} style={{ marginRight: 8 }} />
+                        <Text style={styles.jsonToggleBtnText}>
+                          {showJsonExchange ? 'Hide Raw JSON Exchange' : 'Inspect Raw JSON Exchange (User ⇄ AI)'}
+                        </Text>
+                        {showJsonExchange ? (
+                          <ChevronUp size={16} color={LikhoraColors.textSecondary} />
+                        ) : (
+                          <ChevronDown size={16} color={LikhoraColors.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+
+                      {showJsonExchange && (
+                        <View style={styles.jsonBoxContainer}>
+                          <Text style={styles.jsonBoxLabel}>📤 1. USER JSON PAYLOAD TO AI</Text>
+                          <View style={styles.jsonTerminal}>
+                            <Text style={styles.jsonTerminalText}>{sentJsonPayload || '{}'}</Text>
+                          </View>
+
+                          <Text style={[styles.jsonBoxLabel, { marginTop: 12 }]}>
+                            📥 2. AI 5-PART STRUCTURED JSON RESPONSE TO USER
+                          </Text>
+                          <View style={styles.jsonTerminal}>
+                            <Text style={styles.jsonTerminalText}>{receivedJsonPayload || '{}'}</Text>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* CTA: Apply to My Roadmap */}
+                    <TouchableOpacity
+                      style={styles.applyRoadmapBtn}
+                      onPress={handleApplyRegulatoryToRoadmap}
+                      activeOpacity={0.85}
+                    >
+                      <Plus size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                      <Text style={styles.applyRoadmapBtnText}>
+                        Apply {analyzedRegulatoryProfile.agencyAcronym} Permit to My Roadmap
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* MY SAVED ROADMAPS SWITCHER MODAL                                   */}
+        {/* ------------------------------------------------------------------ */}
+        <Modal
+          visible={showMyRoadmapsModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowMyRoadmapsModal(false)}
+        >
+          <View style={styles.popupOverlay}>
+            <View style={[styles.popupContainer, { maxHeight: '88%' }]}>
+              {/* Header */}
+              <View style={styles.myRoadmapsModalHeader}>
+                <View style={styles.myRoadmapsHeaderIconWrap}>
+                  <FolderKanban size={20} color={LikhoraColors.primary} />
+                </View>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.myRoadmapsModalTitle}>My Roadmaps</Text>
+                    <View style={styles.savedRoadmapsCountBadge}>
+                      <Text style={styles.savedRoadmapsCountText}>
+                        {savedRoadmaps.length} Plan{savedRoadmaps.length > 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.myRoadmapsModalSub}>
+                    Switch between your active and saved business journeys. All progress is preserved.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.closePopupBtn}
+                  onPress={() => setShowMyRoadmapsModal(false)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <X size={20} color={LikhoraColors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Scrollable list of roadmaps */}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingVertical: Spacing.three }}
+              >
+                {savedRoadmaps.map((sRoadmap) => {
+                  const isActive = sRoadmap.id === activeRoadmapId;
+                  const stats = getRoadmapProgress(isActive ? tasks : sRoadmap.tasks);
+
+                  return (
+                    <View
+                      key={sRoadmap.id}
+                      style={[
+                        styles.savedRoadmapCard,
+                        isActive && styles.savedRoadmapCardActive,
+                      ]}
+                    >
+                      <View style={styles.savedRoadmapCardTop}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <View style={styles.savedRoadmapBadgeRow}>
+                            {isActive ? (
+                              <View style={styles.activePlanBadge}>
+                                <View style={styles.activePlanPulse} />
+                                <Text style={styles.activePlanBadgeText}>Active Journey</Text>
+                              </View>
+                            ) : (
+                              <View style={styles.savedPlanBadge}>
+                                <Text style={styles.savedPlanBadgeText}>Saved Plan</Text>
+                              </View>
+                            )}
+                            {sRoadmap.businessType || sRoadmap.category ? (
+                              <View style={styles.categoryPill}>
+                                <Text style={styles.categoryPillText}>
+                                  {sRoadmap.businessType || sRoadmap.category}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.savedRoadmapTitle} numberOfLines={1}>
+                            {sRoadmap.title}
+                          </Text>
+                          <Text style={styles.savedRoadmapMeta}>
+                            {stats.completed} of {stats.effectiveTotal} steps completed • {stats.percent}% Done
+                          </Text>
+                        </View>
+
+                        {savedRoadmaps.length > 1 && (
+                          <TouchableOpacity
+                            style={styles.deleteRoadmapBtn}
+                            onPress={() => handleDeleteRoadmap(sRoadmap)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Trash2 size={15} color={LikhoraColors.textPlaceholder} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Mini Progress Track */}
+                      <View style={styles.savedRoadmapProgressTrack}>
+                        <View
+                          style={[
+                            styles.savedRoadmapProgressFill,
+                            {
+                              width: `${stats.percent}%`,
+                              backgroundColor: isActive ? LikhoraColors.primary : '#10B981',
+                            },
+                          ]}
+                        />
+                      </View>
+
+                      {/* Action Button */}
+                      {isActive ? (
+                        <TouchableOpacity
+                          style={styles.continueJourneyBtn}
+                          onPress={() => {
+                            setShowMyRoadmapsModal(false);
+                            setShowTemplates(false);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.continueJourneyBtnText}>Continue Active Journey</Text>
+                          <ArrowRight size={14} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.switchRoadmapBtn}
+                          onPress={() => {
+                            setShowMyRoadmapsModal(false);
+                            handleSwitchRoadmap(sRoadmap.id);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.switchRoadmapBtnText}>Switch & Resume This Roadmap</Text>
+                          <ArrowRight size={14} color={LikhoraColors.primary} style={{ marginLeft: 6 }} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
 
       </View>
     </SafeAreaView>
@@ -1005,34 +2213,283 @@ const styles = StyleSheet.create({
   templateActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginHorizontal: Spacing.four,
-    marginTop: Spacing.three,
+    gap: 10,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.four,
   },
   customTaskButton: {
     flex: 1,
     backgroundColor: LikhoraColors.primary,
     borderRadius: Radius.pill,
-    height: 42,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 7,
+    shadowColor: LikhoraColors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  myTemplatesButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: LikhoraColors.secondaryLavender,
+  myRoadmapsIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F6F3F7',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: LikhoraColors.softPurple,
+    borderColor: '#E6DEE8',
+    position: 'relative',
+  },
+  myRoadmapsBadgeDot: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: LikhoraColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  myRoadmapsBadgeDotText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  myTemplatesButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F6F3F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E6DEE8',
   },
   customTaskButtonText: {
     color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 13,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  myRoadmapsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingBottom: Spacing.three,
+    borderBottomWidth: 1,
+    borderBottomColor: LikhoraColors.border,
+  },
+  myRoadmapsHeaderIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: LikhoraColors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  myRoadmapsModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  myRoadmapsModalSub: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  // My Roadmaps section
+  savedRoadmapsSection: {
+    marginBottom: Spacing.four,
+  },
+  savedRoadmapsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.two,
+  },
+  savedRoadmapsCountBadge: {
+    backgroundColor: LikhoraColors.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+    marginTop: 2,
+  },
+  savedRoadmapsCountText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  savedRoadmapCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: Radius.large,
+    padding: Spacing.four,
+    marginBottom: Spacing.three,
+    borderWidth: 1.5,
+    borderColor: LikhoraColors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  savedRoadmapCardActive: {
+    borderColor: LikhoraColors.primary,
+    shadowColor: LikhoraColors.primary,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+  },
+  savedRoadmapCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  savedRoadmapBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  activePlanBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: LikhoraColors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  activePlanPulse: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 5,
+  },
+  activePlanBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  savedPlanBadge: {
+    backgroundColor: '#F3EBF4',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  savedPlanBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  categoryPill: {
+    backgroundColor: LikhoraColors.inputBackground,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  categoryPillText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  savedRoadmapTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 2,
+  },
+  savedRoadmapMeta: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontWeight: '600',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  deleteRoadmapBtn: {
+    padding: 6,
+    borderRadius: Radius.pill,
+    backgroundColor: LikhoraColors.inputBackground,
+  },
+  savedRoadmapProgressTrack: {
+    height: 6,
+    backgroundColor: '#F0ECF2',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: 10,
+    marginBottom: 12,
+  },
+  savedRoadmapProgressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  continueJourneyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LikhoraColors.primary,
+    paddingVertical: 10,
+    borderRadius: Radius.medium,
+  },
+  continueJourneyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  switchRoadmapBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LikhoraColors.secondaryLavender,
+    borderWidth: 1,
+    borderColor: LikhoraColors.softPurple,
+    paddingVertical: 10,
+    borderRadius: Radius.medium,
+  },
+  switchRoadmapBtnText: {
+    color: LikhoraColors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  activePillBadge: {
+    backgroundColor: LikhoraColors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  activePillBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  inProgressPillBadge: {
+    backgroundColor: LikhoraColors.secondaryLavender,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: LikhoraColors.softPurple,
+  },
+  inProgressPillBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
     fontFamily: LikhoraFont.fontFamily,
   },
   // -----------------------------------------------------------------------
@@ -1092,39 +2549,70 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: Radius.large,
     borderWidth: 1,
-    borderColor: LikhoraColors.border,
-    paddingHorizontal: Spacing.three,
-    height: 48,
+    borderColor: '#ECE6EE',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 52,
   },
-  compactStepRowLocked: {
-    backgroundColor: LikhoraColors.inputBackground,
-    borderColor: 'transparent',
+  compactStepRowCompleted: {
+    backgroundColor: '#F8FAF8',
+    borderColor: '#D1FAE5',
   },
   compactStepTitle: {
-    flex: 1,
     fontSize: 14,
     fontWeight: '700',
     color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  compactStepSubtitle: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    fontWeight: '500',
+    marginTop: 2,
     fontFamily: LikhoraFont.fontFamily,
   },
   compactStepTitleCompleted: {
     color: LikhoraColors.textSecondary,
     textDecorationLine: 'line-through',
   },
-  compactStepTitleLocked: {
-    color: LikhoraColors.textPlaceholder,
-  },
   compactStepTagDone: {
     fontSize: 11,
     fontWeight: '800',
-    color: LikhoraColors.successGreen,
+    color: '#059669',
     fontFamily: LikhoraFont.fontFamily,
   },
-  compactStepTagLocked: {
+  compactStepTagOpen: {
     fontSize: 11,
     fontWeight: '700',
-    color: LikhoraColors.textPlaceholder,
+    color: LikhoraColors.primary,
     fontFamily: LikhoraFont.fontFamily,
+  },
+  doneBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  skippedBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  openStepBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3EBF4',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  stepDotNumberActive: {
+    color: '#FFFFFF',
   },
   // The one fully-expanded card — always the step the user should be
   // working on right now.
@@ -1232,26 +2720,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    marginBottom: 4,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '800',
     color: LikhoraColors.textPrimary,
     fontFamily: LikhoraFont.fontFamily,
   },
-  headerMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    paddingRight: 8,
-  },
-  headerMetaText: {
-    fontSize: 12,
+  headerSub: {
+    fontSize: 14,
     color: LikhoraColors.textSecondary,
-    fontWeight: '600',
+    marginTop: 2,
     fontFamily: LikhoraFont.fontFamily,
   },
   notifIconBtn: {
@@ -1349,11 +2829,14 @@ const styles = StyleSheet.create({
   },
   segmentedControlContainer: {
     flexDirection: 'row',
-    backgroundColor: '#F2EEE7',
+    backgroundColor: '#F6F3F7',
+    borderWidth: 1,
+    borderColor: '#E6DEE8',
     borderRadius: 14,
     padding: 3,
     marginHorizontal: Spacing.four,
-    marginVertical: Spacing.two,
+    marginBottom: Spacing.two,
+    marginTop: 4,
   },
   segmentBtn: {
     flex: 1,
@@ -1363,23 +2846,23 @@ const styles = StyleSheet.create({
     borderRadius: 11,
   },
   segmentBtnActive: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#2A2130',
+    backgroundColor: '#42143E',
+    shadowColor: '#42143E',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.12,
     shadowRadius: 4,
     elevation: 2,
   },
   segmentText: {
     fontSize: 13,
     fontWeight: '600',
-    color: LikhoraColors.textSecondary,
+    color: '#6E5D70',
     fontFamily: LikhoraFont.fontFamily,
   },
   segmentTextActive: {
     fontSize: 13,
     fontWeight: '800',
-    color: LikhoraColors.textPrimary,
+    color: '#FFFFFF',
     fontFamily: LikhoraFont.fontFamily,
   },
   categoryFilterRow: {
@@ -1997,13 +3480,17 @@ const styles = StyleSheet.create({
   },
   popupFooter: {
     flexDirection: 'row',
+    alignItems: 'stretch',
     gap: 10,
     paddingVertical: Spacing.three,
     borderTopWidth: 1,
     borderTopColor: LikhoraColors.border,
   },
-  toggleCompleteBtn: {
+  popupFooterActions: {
     flex: 2,
+    gap: 8,
+  },
+  toggleCompleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2020,6 +3507,29 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontFamily: LikhoraFont.fontFamily,
   },
+  toggleSkipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LikhoraColors.inputBackground,
+    paddingVertical: 10,
+    borderRadius: Radius.large,
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+  },
+  toggleSkipBtnActive: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FDE68A',
+  },
+  toggleSkipBtnText: {
+    color: LikhoraColors.textSecondary,
+    fontSize: 12.5,
+    fontWeight: '700',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  toggleSkipBtnTextActive: {
+    color: '#B45309',
+  },
   closeDoneBtn: {
     flex: 1,
     alignItems: 'center',
@@ -2034,6 +3544,703 @@ const styles = StyleSheet.create({
     color: LikhoraColors.textPrimary,
     fontSize: 13.5,
     fontWeight: '700',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  stepDotSkipped: {
+    backgroundColor: '#F59E0B',
+    borderColor: '#F59E0B',
+  },
+  compactStepRowSkipped: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FDE68A',
+  },
+  compactStepTitleSkipped: {
+    color: '#92400E',
+    fontStyle: 'italic',
+  },
+  compactStepTagSkipped: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#D97706',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  skippedBadge: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  skippedBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#B45309',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  tipsBanner: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  tipsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  tipsTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#92400E',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  tipItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 4,
+  },
+  tipBullet: {
+    fontSize: 14,
+    color: '#D97706',
+    marginRight: 6,
+    lineHeight: 18,
+  },
+  tipText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#78350F',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regulatoryBannerCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginHorizontal: Spacing.four,
+    marginBottom: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  regulatoryBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.medium,
+    backgroundColor: LikhoraColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  regulatoryBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  regulatoryBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+    marginRight: 6,
+  },
+  govVerifiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.pill,
+  },
+  govVerifiedText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#15803D',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regulatoryBannerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regulatoryBannerSub: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 1,
+  },
+  regModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.three,
+    borderBottomWidth: 1,
+    borderBottomColor: LikhoraColors.border,
+  },
+  regHeaderPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  regGovTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E3A8A',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+    marginRight: 6,
+  },
+  regGovTagText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regAiPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  regAiPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: LikhoraColors.aiBlue,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regModalSub: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 2,
+  },
+  regScrollContent: {
+    padding: Spacing.four,
+    paddingBottom: Spacing.six,
+  },
+  regSearchSection: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.four,
+  },
+  regSectionHeader: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 2,
+  },
+  regSectionSub: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 10,
+  },
+  regChipsRow: {
+    paddingBottom: 8,
+    gap: 6,
+  },
+  regChip: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  regChipActive: {
+    backgroundColor: LikhoraColors.primary,
+    borderColor: LikhoraColors.primary,
+  },
+  regChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regChipTextActive: {
+    color: '#FFFFFF',
+  },
+  regInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 8,
+  },
+  regInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: Radius.medium,
+    paddingHorizontal: 10,
+    height: 40,
+  },
+  regTextInput: {
+    flex: 1,
+    fontSize: 13,
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+    paddingVertical: 0,
+  },
+  regSearchBtn: {
+    backgroundColor: LikhoraColors.primary,
+    borderRadius: Radius.medium,
+    paddingHorizontal: 14,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  regSearchBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regLoadingBox: {
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1.5,
+    borderColor: '#BAE6FD',
+    borderRadius: Radius.large,
+    padding: Spacing.four,
+    alignItems: 'center',
+    marginVertical: Spacing.three,
+  },
+  regLoadingTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0369A1',
+    fontFamily: LikhoraFont.fontFamily,
+    textAlign: 'center',
+  },
+  regLoadingText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0284C7',
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  regLoadingSub: {
+    fontSize: 11,
+    color: '#075985',
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  regHeroCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: LikhoraColors.primary,
+    borderRadius: Radius.large,
+    padding: Spacing.four,
+    marginBottom: Spacing.four,
+    shadowColor: LikhoraColors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  regHeroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  regAgencyBadge: {
+    backgroundColor: LikhoraColors.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: Radius.pill,
+  },
+  regAgencyBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regSourceTag: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  regSourceTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#047857',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regLicenseName: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 22,
+  },
+  regPrimaryAgency: {
+    fontSize: 13,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 4,
+  },
+  regLegalBasisBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: Radius.medium,
+    padding: 10,
+    marginTop: 10,
+  },
+  regLegalBasisText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#92400E',
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 16,
+  },
+  regSpecsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 16,
+  },
+  regSpecItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  regSpecText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: LikhoraColors.border,
+    borderRadius: Radius.large,
+    padding: Spacing.four,
+    marginBottom: Spacing.four,
+  },
+  regCardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.three,
+  },
+  regCardHeaderTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regCardHeaderSub: {
+    fontSize: 11,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginTop: 1,
+  },
+  regReqItem: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: Radius.medium,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+  },
+  regReqHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  regReqDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: LikhoraColors.primary,
+  },
+  regReqTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  mandatoryPill: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.pill,
+  },
+  mandatoryPillText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#DC2626',
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  docCodePill: {
+    backgroundColor: '#E0E7FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.pill,
+  },
+  docCodePillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#4338CA',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  regReqDesc: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 17,
+  },
+  discountHighlightBox: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: Radius.medium,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  discountHighlightTitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#15803D',
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 6,
+  },
+  discountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  discountText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#166534',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  legalItemCard: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: Radius.medium,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+  },
+  legalItemTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  legalItemTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#92400E',
+    fontFamily: LikhoraFont.fontFamily,
+    paddingRight: 6,
+  },
+  lawCodeBadge: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.pill,
+  },
+  lawCodeBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#B45309',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  legalItemSummary: {
+    fontSize: 12,
+    color: '#78350F',
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 17,
+  },
+  liabilityBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: Radius.small,
+    padding: 6,
+    marginTop: 6,
+  },
+  liabilityText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#991B1B',
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 15,
+  },
+  jsonSectionCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.four,
+  },
+  jsonToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  jsonToggleBtnText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#93C5FD',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  jsonBoxContainer: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+    paddingTop: 10,
+  },
+  jsonBoxLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#38BDF8',
+    letterSpacing: 0.5,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 4,
+  },
+  jsonTerminal: {
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: Radius.medium,
+    padding: 10,
+    maxHeight: 180,
+  },
+  jsonTerminalText: {
+    fontSize: 10,
+    fontFamily: 'monospace',
+    color: '#A7F3D0',
+    lineHeight: 14,
+  },
+  applyRoadmapBtn: {
+    backgroundColor: LikhoraColors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: Radius.large,
+    marginTop: 4,
+    shadowColor: LikhoraColors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  applyRoadmapBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  nextStepAiCard: {
+    backgroundColor: '#FAF5FF',
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+    borderRadius: Radius.large,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+  },
+  nextStepAiHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  nextStepAiTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+    flex: 1,
+  },
+  liveAiBadge: {
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: Radius.small,
+  },
+  liveAiBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  nextStepTaskTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: LikhoraColors.textPrimary,
+    fontFamily: LikhoraFont.fontFamily,
+    marginBottom: 4,
+  },
+  nextStepReasonText: {
+    fontSize: 12,
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  nextStepActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nextStepActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
     fontFamily: LikhoraFont.fontFamily,
   },
 });

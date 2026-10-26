@@ -30,17 +30,29 @@ export interface CostInput {
   bulkTotalPrice?: number;
   bulkPortionSize?: number; // one sellable portion, e.g. 5 (kg or L)
 
-  // Single lump-sum extra cost per piece — ice, plastic, kuryente, pamasahe, etc.
+  // Direct ingredient/material cost override if explicitly specified
+  materialCost?: number;
+
+  // Labor cost per batch — cook, helper, packaging labor, etc.
+  laborCostPerBatch?: number;
+
+  // Single lump-sum extra cost per piece — ice, plastic, kuryente, pamasahe, etc. (Overhead)
   dagdagGastosPerPiece?: number;
 }
 
 export interface CostBreakdown {
-  puhunan: number; // base cost per piece, before dagdag gastos
-  dagdagGastosPerPiece: number;
-  totalCostPerPiece: number; // puhunan + dagdag gastos — what the price is built on
+  materialCostPerPiece: number; // material cost per piece
+  laborCostPerPiece: number;    // labor cost per piece (laborCostPerBatch / batchPieces)
+  overheadPerPiece: number;     // overhead (dagdag-gastos) per piece
+  puhunan: number;              // base production cost per piece (material + labor)
+  dagdagGastosPerPiece: number; // overhead per piece (same as overheadPerPiece for backwards compatibility)
+  totalCostPerPiece: number;    // puhunan + dagdag gastos — what the price is built on
 
   batchPieces: number;
-  batchTotalInvestment: number; // total cash actually spent on this batch
+  batchMaterialSpend: number;
+  batchLaborSpend: number;
+  batchOverheadSpend: number;
+  batchTotalInvestment: number; // total cash actually spent on this batch (material + labor + overhead)
 }
 
 export interface PricingOutcome {
@@ -90,58 +102,70 @@ export function priceStep(price: number): number {
 
 /**
  * Turns "how it was bought" into a single cost per piece, plus what the whole
- * batch actually cost. Dagdag gastos counts toward the batch investment too —
- * ice and plastic are real cash out, so break-even has to earn them back.
+ * batch actually cost. Material and labor are accounted for per batch, and
+ * overhead (dagdag gastos) counts toward the total batch investment.
  */
 export function computeCost(input: CostInput): CostBreakdown {
-  let puhunan = 0;
+  let materialSpend = 0;
+  let materialPerPiece = 0;
   let batchPieces = 0;
-  let purchaseSpend = 0; // what was handed over at the supplier, before dagdag gastos
 
   switch (input.purchaseMode) {
     case 'piece': {
-      puhunan = input.manualCostPerPiece || 0;
-      batchPieces = input.batchPieces || 0;
-      purchaseSpend = puhunan * batchPieces;
+      materialPerPiece = input.materialCost !== undefined ? input.materialCost : (input.manualCostPerPiece || 0);
+      batchPieces = input.batchPieces || 1;
+      materialSpend = materialPerPiece * batchPieces;
       break;
     }
     case 'pack':
     case 'case': {
-      const totalPrice = input.packTotalPrice || 0;
+      const totalPrice = input.materialCost !== undefined ? input.materialCost : (input.packTotalPrice || 0);
       const itemCount = input.packItemCount || 0;
-      puhunan = itemCount > 0 ? totalPrice / itemCount : 0;
+      materialPerPiece = itemCount > 0 ? totalPrice / itemCount : 0;
       batchPieces = itemCount;
-      purchaseSpend = totalPrice;
+      materialSpend = totalPrice;
       break;
     }
     case 'kilo':
     case 'liter': {
-      const totalPrice = input.bulkTotalPrice || 0;
+      const totalPrice = input.materialCost !== undefined ? input.materialCost : (input.bulkTotalPrice || 0);
       const totalQuantity = input.bulkQuantity || 0;
       const portionSize = input.bulkPortionSize || 0;
 
-      // The piece count is derived, never asked for: 100 kg sold in 5 kg packs
-      // is 20 packs. Floored, because a leftover 3 kg is not a sellable 5 kg
-      // pack — and the money spent on that leftover stays spread across the
-      // packs that DO sell, which is what the seller actually paid out.
-      const piecesYielded = portionSize > 0 ? Math.floor(totalQuantity / portionSize) : 0;
+      // The piece count is derived: total quantity / portion size
+      const piecesYielded = portionSize > 0 ? Math.floor(totalQuantity / portionSize) : (input.batchPieces || 0);
 
-      puhunan = piecesYielded > 0 ? totalPrice / piecesYielded : 0;
+      materialPerPiece = piecesYielded > 0 ? totalPrice / piecesYielded : 0;
       batchPieces = piecesYielded;
-      purchaseSpend = totalPrice;
+      materialSpend = totalPrice;
       break;
     }
   }
 
-  const dagdagGastosPerPiece = input.dagdagGastosPerPiece || 0;
-  const totalCostPerPiece = puhunan + dagdagGastosPerPiece;
+  const laborCostPerBatch = input.laborCostPerBatch || 0;
+  const laborCostPerPiece = batchPieces > 0 ? laborCostPerBatch / batchPieces : 0;
+  const overheadPerPiece = input.dagdagGastosPerPiece || 0;
+
+  // Base puhunan per piece = material cost + labor cost
+  const puhunan = materialPerPiece + laborCostPerPiece;
+  const totalCostPerPiece = puhunan + overheadPerPiece;
+
+  const batchLaborSpend = laborCostPerBatch;
+  const batchOverheadSpend = overheadPerPiece * batchPieces;
+  const batchTotalInvestment = materialSpend + batchLaborSpend + batchOverheadSpend;
 
   return {
+    materialCostPerPiece: round2(materialPerPiece),
+    laborCostPerPiece: round2(laborCostPerPiece),
+    overheadPerPiece: round2(overheadPerPiece),
     puhunan: round2(puhunan),
-    dagdagGastosPerPiece: round2(dagdagGastosPerPiece),
+    dagdagGastosPerPiece: round2(overheadPerPiece),
     totalCostPerPiece: round2(totalCostPerPiece),
     batchPieces,
-    batchTotalInvestment: round2(purchaseSpend + dagdagGastosPerPiece * batchPieces),
+    batchMaterialSpend: round2(materialSpend),
+    batchLaborSpend: round2(batchLaborSpend),
+    batchOverheadSpend: round2(batchOverheadSpend),
+    batchTotalInvestment: round2(batchTotalInvestment),
   };
 }
 
@@ -377,3 +401,178 @@ export function resolveCategory(raw: string, existingCategories: string[]): stri
 
   return existingCategories.find((category) => singular(category) === target) || normalized;
 }
+
+// ----------------------------------------------------
+// Philippine Regional Minimum Wage Presets (DOLE NWPC)
+// ----------------------------------------------------
+export interface RegionalWagePreset {
+  id: string;
+  region: string;
+  shortName: string;
+  dailyRate: number; // in PHP for non-agricultural 8-hour day
+  standardHours: number; // 8 hours standard work day
+  hourlyRate: number; // dailyRate / standardHours
+  description: string;
+}
+
+/**
+ * Minimum wage rates sourced in accordance with Philippine DOLE NWPC wage orders:
+ * NCR: ₱645/day (₱80.63/hr)
+ * Region 4-A (CALABARZON): ₱520/day (₱65.00/hr)
+ * Region 3 (Central Luzon): ₱500/day (₱62.50/hr)
+ * Region 7 (Central Visayas): ₱468/day (₱58.50/hr)
+ * Region 6 (Western Visayas): ₱480/day (₱60.00/hr)
+ * Region 11 (Davao Region): ₱481/day (₱60.13/hr)
+ * Provincial / Other Regions: ₱435/day (₱54.38/hr)
+ */
+export const PHILIPPINE_REGIONAL_WAGES: RegionalWagePreset[] = [
+  {
+    id: 'ncr',
+    region: 'NCR (Metro Manila)',
+    shortName: 'NCR',
+    dailyRate: 645,
+    standardHours: 8,
+    hourlyRate: 80.625,
+    description: 'Metro Manila: Manila, QC, Taguig, Makati, Pasig, etc.',
+  },
+  {
+    id: 'region4a',
+    region: 'Region 4-A (CALABARZON)',
+    shortName: 'CALABARZON',
+    dailyRate: 520,
+    standardHours: 8,
+    hourlyRate: 65.0,
+    description: 'Cavite, Laguna, Batangas, Rizal, Quezon',
+  },
+  {
+    id: 'region3',
+    region: 'Region 3 (Central Luzon)',
+    shortName: 'Central Luzon',
+    dailyRate: 500,
+    standardHours: 8,
+    hourlyRate: 62.5,
+    description: 'Bulacan, Pampanga, Tarlac, Bataan, Nueva Ecija, Zambales',
+  },
+  {
+    id: 'region7',
+    region: 'Region 7 (Central Visayas)',
+    shortName: 'Central Visayas',
+    dailyRate: 468,
+    standardHours: 8,
+    hourlyRate: 58.5,
+    description: 'Cebu, Bohol, Siquijor',
+  },
+  {
+    id: 'region6',
+    region: 'Region 6 (Western Visayas)',
+    shortName: 'Western Visayas',
+    dailyRate: 480,
+    standardHours: 8,
+    hourlyRate: 60.0,
+    description: 'Iloilo, Bacolod, Negros Occidental, Aklan, Antique, Capiz',
+  },
+  {
+    id: 'region11',
+    region: 'Region 11 (Davao Region)',
+    shortName: 'Davao',
+    dailyRate: 481,
+    standardHours: 8,
+    hourlyRate: 60.125,
+    description: 'Davao City, Davao del Sur, Davao del Norte, Davao Oriental',
+  },
+  {
+    id: 'provincial',
+    region: 'Provincial / Other Regions',
+    shortName: 'Provincial',
+    dailyRate: 435,
+    standardHours: 8,
+    hourlyRate: 54.375,
+    description: 'General baseline across other provinces & rural areas',
+  },
+];
+
+/**
+ * Computes batch labor cost given hourly wage, duration in hours, and number of workers.
+ * e.g., 2 workers working 1.5 hours at ₱80.62/hr = ₱241.88 batch labor.
+ */
+export function calculateBatchLabor(
+  hourlyRate: number,
+  hours: number,
+  workersCount: number = 1
+): number {
+  if (hourlyRate <= 0 || hours <= 0 || workersCount <= 0) return 0;
+  return round2(hourlyRate * hours * workersCount);
+}
+
+/**
+ * Matches user's entered location text against Philippine regional wage presets.
+ */
+export function suggestRegionalWage(location?: string | null): RegionalWagePreset {
+  if (!location) return PHILIPPINE_REGIONAL_WAGES[0]; // Default to NCR
+
+  const loc = location.toLowerCase();
+
+  if (
+    loc.includes('ncr') ||
+    loc.includes('manila') ||
+    loc.includes('quezon') ||
+    loc.includes('makati') ||
+    loc.includes('taguig') ||
+    loc.includes('pasig') ||
+    loc.includes('caloocan') ||
+    loc.includes('mandaluyong') ||
+    loc.includes('marikina') ||
+    loc.includes('pasay') ||
+    loc.includes('valenzuela') ||
+    loc.includes('las pinas') ||
+    loc.includes('paranaque') ||
+    loc.includes('muntinlupa')
+  ) {
+    return PHILIPPINE_REGIONAL_WAGES[0];
+  }
+
+  if (
+    loc.includes('cavite') ||
+    loc.includes('laguna') ||
+    loc.includes('batangas') ||
+    loc.includes('rizal') ||
+    loc.includes('quezon prov') ||
+    loc.includes('calabarzon') ||
+    loc.includes('antipolo') ||
+    loc.includes('dasma') ||
+    loc.includes('bacoor') ||
+    loc.includes('imus') ||
+    loc.includes('calamba') ||
+    loc.includes('sta rosa')
+  ) {
+    return PHILIPPINE_REGIONAL_WAGES[1];
+  }
+
+  if (
+    loc.includes('bulacan') ||
+    loc.includes('pampanga') ||
+    loc.includes('tarlac') ||
+    loc.includes('bataan') ||
+    loc.includes('nueva ecija') ||
+    loc.includes('zambales') ||
+    loc.includes('angeles') ||
+    loc.includes('san fernando')
+  ) {
+    return PHILIPPINE_REGIONAL_WAGES[2];
+  }
+
+  if (loc.includes('cebu') || loc.includes('bohol') || loc.includes('mandaue') || loc.includes('lapu-lapu')) {
+    return PHILIPPINE_REGIONAL_WAGES[3];
+  }
+
+  if (loc.includes('iloilo') || loc.includes('bacolod') || loc.includes('negros') || loc.includes('aklan') || loc.includes('boracay')) {
+    return PHILIPPINE_REGIONAL_WAGES[4];
+  }
+
+  if (loc.includes('davao') || loc.includes('tagum')) {
+    return PHILIPPINE_REGIONAL_WAGES[5];
+  }
+
+  return PHILIPPINE_REGIONAL_WAGES[6]; // Provincial
+}
+

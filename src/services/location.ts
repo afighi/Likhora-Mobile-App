@@ -237,6 +237,28 @@ const forwardGeocodeCache = new Map<string, { lat: number; lng: number }>();
  * Replaces the old approach of matching against a ~26-city hardcoded table
  * that silently defaulted to Bulacan for anywhere else in the country.
  */
+const fetchNominatimCoords = async (q: string): Promise<{ lat: number; lng: number } | null> => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(q)}, Philippines`,
+      { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+          return { lat, lng };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Forward geocoding lookup notice:', e);
+  }
+  return null;
+};
+
 export const geocodePhilippineLocation = async (
   query: string
 ): Promise<{ lat: number; lng: number } | null> => {
@@ -247,23 +269,26 @@ export const geocodePhilippineLocation = async (
   const cached = forwardGeocodeCache.get(cacheKey);
   if (cached) return cached;
 
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(cleaned)}, Philippines`,
-      { headers: { 'User-Agent': 'LikhoraApp/1.0' } }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const coords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-        if (!Number.isNaN(coords.lat) && !Number.isNaN(coords.lng)) {
-          forwardGeocodeCache.set(cacheKey, coords);
-          return coords;
-        }
-      }
+  // Attempt 1: Exact query (e.g. "Barangay Socorro, Quezon City, Metro Manila")
+  let coords = await fetchNominatimCoords(cleaned);
+
+  // Attempt 2: Strip Barangay/Brgy prefix (e.g. "Socorro, Quezon City, Metro Manila")
+  if (!coords && /^(Barangay|Brgy\.?)\s+/i.test(cleaned)) {
+    const stripped = cleaned.replace(/^(Barangay|Brgy\.?)\s+/i, '');
+    coords = await fetchNominatimCoords(stripped);
+  }
+
+  // Attempt 3: If query has commas (e.g., barangay, city, province), fallback to the city & province
+  if (!coords && cleaned.includes(',')) {
+    const fallbackCity = cleaned.split(',').slice(1).join(',').trim();
+    if (fallbackCity) {
+      coords = await fetchNominatimCoords(fallbackCity);
     }
-  } catch (e) {
-    console.warn('Forward geocoding fallback:', e);
+  }
+
+  if (coords) {
+    forwardGeocodeCache.set(cacheKey, coords);
+    return coords;
   }
   return null;
 };

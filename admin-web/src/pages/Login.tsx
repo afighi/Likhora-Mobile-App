@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { loginWithFirebase } from '../lib/firebase';
+import { Lock, Mail, AlertCircle } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,8 +14,6 @@ export default function Login() {
     setSubmitting(true);
     try {
       await loginWithFirebase(email, password);
-      // AuthContext's onAuthStateChanged listener picks up the new session
-      // and runs the is_admin check; nothing else to do here.
     } catch {
       setError('Could not sign in. Check your email and password.');
     } finally {
@@ -23,49 +22,64 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-parchment px-4">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-black/5 p-8"
-      >
+    <div className="min-h-screen flex items-center justify-center bg-[#F5F4F8] px-4">
+      <div className="w-full max-w-sm bg-white rounded-[22px] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#E6DEE8] p-8">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 h-12 w-12 rounded-xl bg-brand flex items-center justify-center text-white font-bold text-lg">
-            L
+          <div className="mx-auto mb-3.5 h-14 w-14 rounded-2xl bg-[#FAF8FA] border border-[#E6DEE8] flex items-center justify-center p-2 shadow-xs">
+            <img src="/likhoralogo-mark.png" alt="LikhAI Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-lg font-bold text-ink">LikhAI Admin Portal</h1>
-          <p className="text-sm text-inkSoft mt-1">Sign in with your admin account</p>
+          <h1 className="text-xl font-bold tracking-tight text-[#1E1320]">LikhAI Admin Portal</h1>
+          <p className="text-xs text-[#6E5D70] mt-1 font-medium">Sign in with verified administrator credentials</p>
         </div>
 
-        <label className="block text-xs font-semibold text-inkSoft mb-1">Email</label>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full mb-4 rounded-lg border border-line bg-inputBg px-3 py-2 text-sm text-ink outline-none focus:border-brand"
-          placeholder="admin@example.com"
-        />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-[#1E1320] mb-1.5">Email Address</label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-[#8C7A8E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-xl border border-[#E6DEE8] bg-[#FAF8FA] pl-9.5 pr-3.5 py-2.5 text-sm text-[#1E1320] outline-none transition-all focus:ring-2 focus:ring-[#42143E]/20 focus:border-[#42143E]"
+                placeholder="admin@likhai.com"
+              />
+            </div>
+          </div>
 
-        <label className="block text-xs font-semibold text-inkSoft mb-1">Password</label>
-        <input
-          type="password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full mb-4 rounded-lg border border-line bg-inputBg px-3 py-2 text-sm text-ink outline-none focus:border-brand"
-          placeholder="••••••••"
-        />
+          <div>
+            <label className="block text-xs font-semibold text-[#1E1320] mb-1.5">Password</label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-[#8C7A8E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-xl border border-[#E6DEE8] bg-[#FAF8FA] pl-9.5 pr-3.5 py-2.5 text-sm text-[#1E1320] outline-none transition-all focus:ring-2 focus:ring-[#42143E]/20 focus:border-[#42143E]"
+                placeholder="••••••••"
+              />
+            </div>
+          </div>
 
-        {error && <p className="text-sm text-danger mb-3">{error}</p>}
+          {error && (
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-[#DC2626] shrink-0 mt-0.5" />
+              <p className="text-xs font-medium text-[#DC2626]">{error}</p>
+            </div>
+          )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-lg bg-brand text-white font-semibold py-2.5 text-sm disabled:opacity-60"
-        >
-          {submitting ? 'Signing in...' : 'Sign In'}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded-xl bg-[#42143E] hover:bg-[#310E2E] active:scale-[0.99] text-white font-semibold py-2.5 text-sm shadow-[0_4px_12px_rgba(66,20,62,0.2)] transition-all disabled:opacity-50 cursor-pointer mt-2"
+          >
+            {submitting ? 'Authenticating…' : 'Sign In'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
+

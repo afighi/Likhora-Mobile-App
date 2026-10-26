@@ -31,16 +31,16 @@ export const LikhoraColors = {
   textSecondary: '#7A6F80',
   textPlaceholder: '#A095A6',
 
-  // Surface Containers & Backgrounds (Warm Parchment iOS Aesthetic)
-  backgroundScreen: '#FAF8F5', // Warm parchment background instead of plain white
-  parchmentBackground: '#FAF8F5',
-  parchmentTrack: '#F2EEE7',
+  // Surface Containers & Backgrounds (Unified Likha Aesthetic)
+  backgroundScreen: '#F5F4F8', // Community background color across all screens
+  parchmentBackground: '#F5F4F8',
+  parchmentTrack: '#ECEBF0',
   cardBackground: '#FFFFFF', // Large rounded white cards
   cardBorder: 'rgba(42, 33, 48, 0.07)',
-  inputBackground: '#F4F1EA',
-  inputBorder: '#E8E3D8',
+  inputBackground: '#ECEAF0',
+  inputBorder: '#E1DDE6',
   inputFocusBorder: '#4A154B',
-  border: '#E8E3D8',
+  border: '#E1DDE6',
 } as const;
 
 export const LikhoraFont = {

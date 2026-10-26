@@ -1,20 +1,23 @@
 @import "tailwindcss";
 
-/* Colors mirrored from the mobile app's src/constants/theme.ts (LikhoraColors)
-   so the admin portal reads as the same product, not a generic admin template. */
+/* Deep Plum & iOS Grouped Alabaster Surface Design System */
 @theme {
-  --color-brand: #4a154b; /* primary */
-  --color-brandDark: #350d36;
-  --color-parchment: #faf8f5; /* backgroundScreen */
-  --color-ink: #2a2130; /* textPrimary */
-  --color-inkSoft: #7a6f80; /* textSecondary */
-  --color-inputBg: #f4f1ea;
-  --color-line: #e8e3d8; /* border */
-  --color-success: #5bb381; /* successGreen */
-  --color-danger: #ce375c; /* errorRed */
-  --font-sans: 'Montserrat', system-ui, -apple-system, sans-serif;
+  --color-brand: #42143E;
+  --color-brandDark: #310E2E;
+  --color-parchment: #F5F4F8;
+  --color-ink: #1E1320;
+  --color-inkSoft: #6E5D70;
+  --color-inputBg: #FAF8FA;
+  --color-line: #E6DEE8;
+  --color-success: #059669;
+  --color-danger: #DC2626;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 body {
   font-family: var(--font-sans);
+  background-color: #F5F4F8;
+  color: #1E1320;
+  -webkit-font-smoothing: antialiased;
 }
+

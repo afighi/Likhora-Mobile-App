@@ -16,7 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Input } from '@/components/ui/Input';
 import { LikhoraColors, Radius, Spacing, LikhoraFont } from '@/constants/theme';
 import { useNotification } from '@/context/NotificationContext';
-import { askKhoraAI, generateBusinessNameSuggestions } from '@/services/claude';
+import {
+  askKhoraAI,
+  generateBusinessNameSuggestions,
+  validateAndCheckKhoraScope,
+} from '@/services/claude';
 
 interface ChatMessage {
   id: string;
@@ -48,6 +52,7 @@ export default function AIAssistantTab() {
   ]);
   const [loading, setLoading] = useState(false);
   const [processedPrompt, setProcessedPrompt] = useState<string | null>(null);
+  const lastSentTimestamp = useRef<number>(0);
 
   // Handle incoming redirect prompt parameters from Roadmap
   useEffect(() => {
@@ -99,15 +104,32 @@ export default function AIAssistantTab() {
     // Validation 1: Empty or whitespace guard
     if (!targetText) return;
 
-    // Validation 2: Character limit check
+    // Validation 2: Minimum character length check (minimum 2 characters)
+    if (targetText.length < 2) {
+      Alert.alert(
+        'Inquiry Too Short',
+        'Please enter a more detailed business question (at least 2 characters).'
+      );
+      return;
+    }
+
+    // Validation 3: Maximum character length check (maximum 500 characters)
     if (targetText.length > 500) {
       Alert.alert('Message Too Long', 'Please limit your inquiry to 500 characters or less.');
       return;
     }
 
-    // Validation 3: Rate limiting / Loading guard
+    // Validation 4: Cooldown / Rate Limiting (1.5 seconds between sends)
+    const now = Date.now();
+    if (now - lastSentTimestamp.current < 1500) {
+      Alert.alert('Please Wait', 'Please allow a moment before sending another inquiry.');
+      return;
+    }
+
+    // Validation 5: Loading guard
     if (loading) return;
 
+    lastSentTimestamp.current = now;
     if (!customPrompt) setPrompt('');
 
     const userMsgObj: ChatMessage = {
@@ -118,6 +140,22 @@ export default function AIAssistantTab() {
     };
 
     setMessages((prev) => [...prev, userMsgObj]);
+
+    // Validation 6: Pre-screen scope and prompt injections
+    const scopeCheck = validateAndCheckKhoraScope(targetText);
+    if (!scopeCheck.allowed) {
+      const refusalMsgObj: ChatMessage = {
+        id: `ai-${Date.now()}`,
+        sender: 'ai',
+        text: scopeCheck.refusal || 'Inquiry is outside of Philippine business scope.',
+        time: getCurrentTime(),
+      };
+      setMessages((prev) => [...prev, refusalMsgObj]);
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+      return;
+    }
 
     setLoading(true);
     const aiResponse = await askKhoraAI(targetText);
@@ -237,6 +275,14 @@ export default function AIAssistantTab() {
               <Text style={styles.title}>Khora AI Assistant</Text>
               <Text style={styles.subtitle}>24/7 Filipino Small Business Advisor</Text>
             </View>
+
+            {/* Scope Guardrail Badge */}
+            <View style={styles.scopeBanner}>
+              <ShieldCheck size={12} color={LikhoraColors.primary} style={{ marginRight: 5 }} />
+              <Text style={styles.scopeBannerText}>
+                Exclusively trained on Philippine Business Permits, Costing & Suppliers
+              </Text>
+            </View>
           </View>
 
           {/* 2. MESSAGES CONVERSATION SCROLLVIEW */}
@@ -317,18 +363,38 @@ export default function AIAssistantTab() {
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                <ShieldCheck size={14} color={LikhoraColors.aiBlue} style={{ marginRight: 6 }} />
+                <ShieldCheck size={13} color={LikhoraColors.aiBlue} style={{ marginRight: 5 }} />
                 <Text style={styles.helperChipText}>Barangay & DTI Permits</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
                 style={styles.helperChip} 
-                onPress={() => handleQuickPrompt("How do I compute product costing with 35% margin?")}
+                onPress={() => handleQuickPrompt("How do I compute product costing with 40% margin?")}
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                <Sparkles size={14} color={LikhoraColors.highlightYellow} style={{ marginRight: 6 }} />
-                <Text style={styles.helperChipText}>Costing & Margins</Text>
+                <Sparkles size={13} color={LikhoraColors.highlightYellow} style={{ marginRight: 5 }} />
+                <Text style={styles.helperChipText}>40% Margin Costing</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.helperChip} 
+                onPress={() => handleQuickPrompt("How do I apply for Mayor's Permit and BIR Form 1901 8% tax option?")}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <ShieldCheck size={13} color={LikhoraColors.primary} style={{ marginRight: 5 }} />
+                <Text style={styles.helperChipText}>Mayor's & BIR 8% Tax</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.helperChip} 
+                onPress={() => handleQuickPrompt("Where can I find wholesale packaging suppliers in Divisoria?")}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <Sparkles size={13} color={LikhoraColors.aiBlue} style={{ marginRight: 5 }} />
+                <Text style={styles.helperChipText}>Divisoria Suppliers</Text>
               </TouchableOpacity>
 
               <TouchableOpacity 
@@ -337,8 +403,18 @@ export default function AIAssistantTab() {
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                <Sparkles size={14} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
+                <Sparkles size={13} color={LikhoraColors.primary} style={{ marginRight: 5 }} />
                 <Text style={styles.helperChipText}>Name Generator</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.helperChip} 
+                onPress={() => handleQuickPrompt("What are the benefits of RA 9178 BMBE tax exemption?")}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <ShieldCheck size={13} color={LikhoraColors.highlightYellow} style={{ marginRight: 5 }} />
+                <Text style={styles.helperChipText}>BMBE Tax Exemption</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -412,6 +488,24 @@ const styles = StyleSheet.create({
   },
   headerTitleRow: {
     marginBottom: 2,
+  },
+  scopeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5FA',
+    borderWidth: 1,
+    borderColor: '#EFE5F0',
+    borderRadius: Radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  scopeBannerText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: LikhoraColors.primary,
+    fontFamily: LikhoraFont.fontFamily,
   },
   title: {
     fontSize: 20,

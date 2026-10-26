@@ -77,14 +77,29 @@ export default function BusinessPortfolioScreen() {
   );
 
   const handleGenerateNames = async () => {
+    if (!keywords.trim()) {
+      Alert.alert(
+        'Keywords Needed',
+        'Please enter at least one keyword or detail about your business (e.g. affordable, student-friendly, Bulacan) to generate tailored names.'
+      );
+      return;
+    }
+
     setGenerating(true);
-    const { suggestions: results } = await generateBusinessNames({
+    const { suggestions: results, source } = await generateBusinessNames({
       businessType: userProfile?.business_type || 'small business',
-      keywords: keywords || userProfile?.business_type || '',
+      keywords: keywords.trim(),
       location: userProfile?.location,
     });
     setSuggestions(results);
     setGenerating(false);
+
+    if (source === 'offline') {
+      Alert.alert(
+        'Suggestions Unavailable',
+        'Could not reach Khora AI right now. Showing offline suggestions — check your connection and try again.'
+      );
+    }
   };
 
   const handleSave = async () => {

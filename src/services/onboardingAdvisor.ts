@@ -24,6 +24,7 @@ import {
   GENERIC_PROFILE,
   RiskOption,
   TaskBlueprint,
+  buildCustomBusinessProfile,
 } from './businessProfiles';
 
 const AI_TIMEOUT_MS = 20000;
@@ -37,14 +38,9 @@ const buildPrompt = (businessType: string, location?: string | null): string =>
   [
     `A Filipino micro-entrepreneur is starting a "${businessType}" business${location ? ` in ${location}` : ''}.`,
     '',
-    'Build their onboarding profile. Think carefully about whether this business',
-    'sells GOODS or sells LABOUR/SERVICES — a pet groomer, laundry or repair shop',
-    'has no wholesale supplier to canvass and nothing to put a price tag on, so',
-    'their questions and tasks must be about rates, hours, tools and bookings',
-    'instead of stock and shelves.',
-    '',
-    'Everything must fit Philippine reality: PHP amounts, local agencies (DTI,',
-    'Barangay, BIR, LGU), and plain language a first-time owner understands.',
+    'Build their onboarding profile and comprehensive 5-phase business execution blueprint.',
+    'Think carefully about whether this business sells GOODS or sells LABOUR/SERVICES.',
+    'Everything must fit Philippine reality: PHP amounts, local agencies (DTI, Barangay, BIR, LGU), and plain language a first-time owner understands.',
     '',
     'Reply with ONLY a JSON object, no markdown fence and no text around it:',
     '{',
@@ -52,24 +48,46 @@ const buildPrompt = (businessType: string, location?: string | null): string =>
     '  "customer_segments": ["<5 realistic customer groups>"],',
     '  "differentiator_placeholder": "<short example answer in English, starts with e.g.>",',
     '  "risks": [',
-    '    { "risk": "<short risk name>", "contingency": "<1 sentence, concrete action>" }',
+    '    { "risk": "<short risk name>", "contingency": "<1 sentence, concrete Philippine action>" }',
     '  ],',
     '  "extra_questions": [',
     '    { "label": "<a question in plain English specific to THIS business>", "options": ["<3-4 short answers>"] }',
     '  ],',
-    '  "operations_task": {',
-    '    "title": "<what they must set up to operate: costing, tools, stock, rates>",',
-    '    "desc": "<1 sentence>",',
-    '    "sub_steps": ["<4-5 concrete steps>"]',
-    '  },',
-    '  "launch_task": {',
-    '    "title": "<what opening day requires for this business>",',
-    '    "desc": "<1 sentence>",',
-    '    "sub_steps": ["<4-5 concrete steps>"]',
-    '  }',
+    '  "business_execution_tasks": [',
+    '    {',
+    '      "title": "<Phase 1: Location, Space Feasibility, Facility Layout or Digital Storefront>",',
+    '      "desc": "<1 sentence on feasibility and space setup>",',
+    '      "category": "Planning",',
+    '      "sub_steps": ["<4 actionable concrete sub-steps>"]',
+    '    },',
+    '    {',
+    '      "title": "<Phase 2: Equipment Canvassing, Machinery, Tools & Direct Supplier Sourcing>",',
+    '      "desc": "<1 sentence on sourcing and vendor terms>",',
+    '      "category": "Supplies",',
+    '      "sub_steps": ["<4 actionable concrete sub-steps>"]',
+    '    },',
+    '    {',
+    '      "title": "<Phase 3: Unit Costing, Pricing Strategy & Profit Margin Architecture>",',
+    '      "desc": "<1 sentence on computing costs and margins>",',
+    '      "category": "Operations",',
+    '      "sub_steps": ["<4 actionable concrete sub-steps>"]',
+    '    },',
+    '    {',
+    '      "title": "<Phase 4: Daily Operational SOPs, Quality Control & Workflows>",',
+    '      "desc": "<1 sentence on daily checklists and standards>",',
+    '      "category": "Operations",',
+    '      "sub_steps": ["<4 actionable concrete sub-steps>"]',
+    '    },',
+    '    {',
+    '      "title": "<Phase 5: Soft Opening Dry-Run, Customer Acquisition & Promotional Kickoff>",',
+    '      "desc": "<1 sentence on opening launch and early customers>",',
+    '      "category": "Launch",',
+    '      "sub_steps": ["<4 actionable concrete sub-steps>"]',
+    '    }',
+    '  ]',
     '}',
     '',
-    'Give 6-8 risks and 2-3 extra questions. No markdown anywhere in the values.',
+    'Give 6-8 risks, 2-3 extra questions, and exactly 5 business execution tasks. No markdown anywhere in the values.',
   ].join('\n');
 
 /** Pulls the first balanced {...} block out of a reply, fence or prose included. */
@@ -133,8 +151,38 @@ const parseExtraQuestions = (value: any): ExtraQuestion[] => {
 };
 
 /**
+ * Builds an array of 5 task blueprints from the AI's response, keeping compliance
+ * metadata and categories intact so users get realistic, structured steps.
+ */
+const parseBusinessExecutionTasks = (
+  value: any,
+  fallbackTasks: TaskBlueprint[]
+): TaskBlueprint[] => {
+  if (!Array.isArray(value) || value.length < 4) return fallbackTasks;
+
+  const parsed = value.map((item, idx) => {
+    const fallback = fallbackTasks[idx] || fallbackTasks[fallbackTasks.length - 1];
+    const title = cleanText(item?.title, 90);
+    const desc = cleanText(item?.desc, 220) || fallback.desc;
+    const subSteps = cleanList(item?.sub_steps, 6, 160);
+
+    if (!title || subSteps.length < 2) return fallback;
+
+    return {
+      ...fallback,
+      title,
+      desc,
+      category: cleanText(item?.category, 30) || fallback.category,
+      sub_steps: subSteps,
+    };
+  });
+
+  return parsed.length >= 4 ? parsed : fallbackTasks;
+};
+
+/**
  * Builds a task blueprint from the AI's title/desc/sub_steps, keeping the
- * compliance metadata from the neutral profile — an LLM should not be
+ * compliance metadata from the profile — an LLM should not be
  * inventing agencies, legal bases or fee ranges that a user might act on.
  */
 const parseTask = (value: any, fallback: TaskBlueprint): TaskBlueprint => {
@@ -151,14 +199,14 @@ const parseTask = (value: any, fallback: TaskBlueprint): TaskBlueprint => {
 };
 
 /**
- * Asks Khora to design onboarding for a business type we have no profile for.
- * Always resolves — an unusable answer falls back to GENERIC_PROFILE.
+ * Asks Khora to design onboarding and 5-phase business execution for a business type.
+ * Always resolves — an unreachable answer falls back to buildCustomBusinessProfile.
  */
 export const generateCustomBusinessProfile = async (
   businessType: string,
   location?: string | null
 ): Promise<CustomProfileResult> => {
-  const named: BusinessProfile = { ...GENERIC_PROFILE, id: businessType, label: businessType };
+  const named: BusinessProfile = buildCustomBusinessProfile(businessType);
 
   if (!businessType.trim()) return { profile: named, source: 'offline' };
 
@@ -185,6 +233,11 @@ export const generateCustomBusinessProfile = async (
       return { profile: named, source: 'offline' };
     }
 
+    const businessExecutionTasks = parseBusinessExecutionTasks(
+      parsed.business_execution_tasks,
+      named.businessExecutionTasks || []
+    );
+
     return {
       profile: {
         ...named,
@@ -194,8 +247,9 @@ export const generateCustomBusinessProfile = async (
           cleanText(parsed.differentiator_placeholder, 120) || named.differentiatorPlaceholder,
         risks,
         extraQuestions: parseExtraQuestions(parsed.extra_questions),
-        operationsTask: parseTask(parsed.operations_task, named.operationsTask),
-        launchTask: parseTask(parsed.launch_task, named.launchTask),
+        businessExecutionTasks,
+        operationsTask: businessExecutionTasks[1] || parseTask(parsed.operations_task, named.operationsTask),
+        launchTask: businessExecutionTasks[businessExecutionTasks.length - 1] || parseTask(parsed.launch_task, named.launchTask),
       },
       source: 'khora-ai',
     };

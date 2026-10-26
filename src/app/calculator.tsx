@@ -463,6 +463,22 @@ export default function SmartCalculatorScreen() {
                         <Text style={styles.productSub} numberOfLines={1}>
                           {product.category || 'Uncategorised'} · {peso(product.total_cost_per_piece)} cost
                         </Text>
+                        {((product.labor_cost_per_batch || 0) > 0 || (product.material_cost || 0) > 0) && (
+                          <View style={styles.costBadgeRow}>
+                            {(product.material_cost || 0) > 0 && (
+                              <Text style={styles.costBadgeText}>
+                                Mat: {peso(product.material_cost || 0)}
+                              </Text>
+                            )}
+                            {(product.labor_cost_per_batch || 0) > 0 && (
+                              <View style={styles.laborBadgePill}>
+                                <Text style={styles.laborBadgePillText}>
+                                  Labor incl.
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
                         {product.breakeven_units ? (
                           <Text style={styles.productRoi} numberOfLines={1}>
                             Break even at {product.breakeven_units} pc{product.breakeven_units === 1 ? '' : 's'}
@@ -762,7 +778,7 @@ const styles = StyleSheet.create({
   productImage: {
     width: 46,
     height: 46,
-    borderRadius: Radius.medium,
+    borderRadius: Radius.small,
     marginRight: 12,
     backgroundColor: LikhoraColors.inputBackground,
   },
@@ -784,6 +800,30 @@ const styles = StyleSheet.create({
     color: LikhoraColors.aiBlue,
     fontWeight: '700',
     marginTop: 3,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  costBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
+  },
+  costBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: LikhoraColors.textSecondary,
+    fontFamily: LikhoraFont.fontFamily,
+  },
+  laborBadgePill: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radius.pill,
+  },
+  laborBadgePillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#92400E',
     fontFamily: LikhoraFont.fontFamily,
   },
 

@@ -16,6 +16,13 @@ const GOOGLE_PLACES_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
 
 const PLACES_BASE = 'https://places.googleapis.com/v1';
 
+export interface PlaceReview {
+  authorName?: string;
+  rating?: number;
+  text?: string;
+  relativeTime?: string;
+}
+
 export interface GooglePlaceResult {
   id: string;
   name: string;
@@ -29,6 +36,7 @@ export interface GooglePlaceResult {
   types: string[];
   photoUrl: string | null;
   googleMapsUri: string | null;
+  reviews?: PlaceReview[];
 }
 
 export const isGooglePlacesConfigured = (): boolean => Boolean(GOOGLE_PLACES_API_KEY);
@@ -53,6 +61,14 @@ const mapPlace = (place: any): GooglePlaceResult => ({
   types: place.types || [],
   photoUrl: resolvePhotoUrl(place.photos?.[0]?.name),
   googleMapsUri: place.googleMapsUri || null,
+  reviews: Array.isArray(place.reviews)
+    ? place.reviews.slice(0, 3).map((r: any) => ({
+        authorName: r.authorAttribution?.displayName || 'Customer',
+        rating: typeof r.rating === 'number' ? r.rating : undefined,
+        text: r.text?.text || r.originalText?.text || '',
+        relativeTime: r.relativePublishTimeDescription || '',
+      }))
+    : [],
 });
 
 const FIELD_MASK = [
@@ -68,6 +84,7 @@ const FIELD_MASK = [
   'places.types',
   'places.photos',
   'places.googleMapsUri',
+  'places.reviews',
 ].join(',');
 
 /**

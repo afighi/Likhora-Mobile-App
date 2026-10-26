@@ -742,6 +742,40 @@ export default function SuppliersTab() {
     `;
   };
 
+  const handleCallSupplier = async (phone?: string, name?: string) => {
+    if (!phone) {
+      Alert.alert(
+        'Phone Unavailable',
+        `No public phone number was listed for ${name || 'this supplier'}. You can still visit their mapped location or get directions.`
+      );
+      return;
+    }
+    const cleanPhone = phone.replace(/[^0-9+]/g, '');
+    const url = `tel:${cleanPhone}`;
+    const canOpen = await Linking.canOpenURL(url).catch(() => false);
+    if (canOpen) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert('Contact Supplier', `Call ${name || 'supplier'} at ${phone}`);
+    }
+  };
+
+  const handleGetDirections = async (supplier: SupplierItem) => {
+    if (supplier.lat && supplier.lng) {
+      const url = Platform.select({
+        ios: `maps:0,0?q=${supplier.lat},${supplier.lng}(${encodeURIComponent(supplier.name)})`,
+        android: `geo:0,0?q=${supplier.lat},${supplier.lng}(${encodeURIComponent(supplier.name)})`,
+        default: `https://www.google.com/maps/dir/?api=1&destination=${supplier.lat},${supplier.lng}`,
+      });
+      await Linking.openURL(url).catch(() => {
+        Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${supplier.lat},${supplier.lng}`);
+      });
+    } else {
+      const query = encodeURIComponent(`${supplier.name} ${supplier.location}`);
+      await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+    }
+  };
+
   const openOpenStreetMap = async () => {
     const mapCenter = selectedMapPin?.lat && selectedMapPin?.lng
       ? selectedMapPin
@@ -965,16 +999,29 @@ export default function SuppliersTab() {
               <Store size={32} color={LikhoraColors.textPlaceholder} style={{ marginBottom: 8 }} />
               <Text style={styles.emptyStateTitle}>No suppliers found near {displayLocation}</Text>
               <Text style={styles.emptyStateSub}>
-                Tap below to search again.
+                Try broadening your category filter or retrying the live search.
               </Text>
-              <TouchableOpacity
-                style={styles.retryApiBtn}
-                onPress={loadSuppliersLive}
-                activeOpacity={0.8}
-              >
-                <RefreshCw size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.retryApiBtnText}>Retry Live API Search</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                <TouchableOpacity
+                  style={styles.retryApiBtn}
+                  onPress={() => {
+                    setActiveCategory('All');
+                    loadSuppliersLive();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Store size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.retryApiBtnText}>Browse All Categories</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.retryApiBtn, { backgroundColor: LikhoraColors.primarySoft }]}
+                  onPress={loadSuppliersLive}
+                  activeOpacity={0.8}
+                >
+                  <RefreshCw size={14} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
+                  <Text style={[styles.retryApiBtnText, { color: LikhoraColors.primary }]}>Retry Search</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : filteredSuppliersList.length === 0 ? (
             <View style={styles.emptyStateBox}>
@@ -1071,11 +1118,17 @@ export default function SuppliersTab() {
                   <View style={styles.actionBtnRow}>
                     <TouchableOpacity
                       style={styles.contactBtn}
-                      onPress={() => Alert.alert(item.phone ? 'Contact supplier' : 'Contact details unavailable', item.phone ? `Call ${item.name} at ${item.phone}` : 'This listing does not include a phone number. Check the mapped location for current details.')}
+                      onPress={() => {
+                        if (item.phone) {
+                          handleCallSupplier(item.phone, item.name);
+                        } else {
+                          handleGetDirections(item);
+                        }
+                      }}
                       activeOpacity={0.8}
                     >
                       <Phone size={14} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
-                      <Text style={styles.contactBtnText}>Contact</Text>
+                      <Text style={styles.contactBtnText}>{item.phone ? 'Call' : 'Directions'}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -1195,7 +1248,38 @@ export default function SuppliersTab() {
               <Text style={styles.detailLabel}>Price range</Text><Text style={styles.detailValue}>{selectedSupplier?.price_range || selectedSupplier?.price_level || 'Contact supplier for current prices'}</Text>
               <Text style={styles.detailLabel}>Contact</Text><Text style={styles.detailValue}>{selectedSupplier?.phone || 'No public phone number in this listing'}</Text>
               <Text style={styles.detailLabel}>Listing details</Text><View style={styles.detailTags}>{selectedSupplier?.tags?.map((tag) => <View key={tag} style={styles.detailTag}><Text style={styles.detailTagText}>{tag}</Text></View>)}</View>
-              <TouchableOpacity style={styles.detailMapButton} onPress={() => { setSelectedMapPin(selectedSupplier); setSelectedSupplier(null); setShowMapModal(true); }}><MapPin size={16} color="#FFFFFF" /><Text style={styles.detailMapText}>View on map</Text></TouchableOpacity>
+              <View style={styles.detailActionsRow}>
+                {selectedSupplier?.phone ? (
+                  <TouchableOpacity
+                    style={styles.detailCallBtn}
+                    onPress={() => handleCallSupplier(selectedSupplier.phone, selectedSupplier.name)}
+                    activeOpacity={0.85}
+                  >
+                    <Phone size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.detailBtnText}>Call</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.detailDirectionsBtn}
+                  onPress={() => selectedSupplier && handleGetDirections(selectedSupplier)}
+                  activeOpacity={0.85}
+                >
+                  <Navigation size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.detailBtnText}>Directions</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.detailMapBtn}
+                  onPress={() => {
+                    setSelectedMapPin(selectedSupplier);
+                    setSelectedSupplier(null);
+                    setShowMapModal(true);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <MapPin size={15} color={LikhoraColors.primary} style={{ marginRight: 6 }} />
+                  <Text style={[styles.detailBtnText, { color: LikhoraColors.primary }]}>Map</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -1869,8 +1953,11 @@ const styles = StyleSheet.create({
   detailTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
   detailTag: { backgroundColor: LikhoraColors.secondaryLavender, paddingHorizontal: 9, paddingVertical: 5, borderRadius: Radius.pill },
   detailTagText: { color: LikhoraColors.primary, fontSize: 11, fontWeight: '700', fontFamily: LikhoraFont.fontFamily },
-  detailMapButton: { marginTop: 20, height: 46, borderRadius: Radius.pill, backgroundColor: LikhoraColors.primary, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
-  detailMapText: { color: '#FFFFFF', fontWeight: '800', fontFamily: LikhoraFont.fontFamily },
+  detailActionsRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  detailCallBtn: { flex: 1, height: 46, borderRadius: Radius.pill, backgroundColor: LikhoraColors.successGreen, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  detailDirectionsBtn: { flex: 1, height: 46, borderRadius: Radius.pill, backgroundColor: LikhoraColors.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  detailMapBtn: { flex: 1, height: 46, borderRadius: Radius.pill, backgroundColor: LikhoraColors.secondaryLavender, borderWidth: 1, borderColor: LikhoraColors.softPurple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  detailBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, fontFamily: LikhoraFont.fontFamily },
   filterSheet: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: Radius.xlarge,

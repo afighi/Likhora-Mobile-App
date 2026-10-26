@@ -11,6 +11,8 @@
       "icon": "./assets/images/likhoralogo.png"
     },
     "android": {
+      "package": "com.company.likhoraai",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#FDFBF7",
         "foregroundImage": "./assets/images/likhoralogo.png"
@@ -36,6 +38,12 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Likhora AI uses your location to find accurate, nearby wholesale suppliers and marketplaces."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Likhora AI needs access to your photo library to select photos for products and profile avatars."
         }
       ]
     ],

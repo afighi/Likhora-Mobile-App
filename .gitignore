@@ -52,3 +52,13 @@ serviceAccountKey.json
 
 # Supabase CLI local state (linked project ref, cached version).
 supabase/.temp/
+
+# Large binaries, APKs, test artifacts
+*.apk
+*.aab
+*.ipa
+LikhAI.apk
+
+# Temporary development & scratch scripts
+scratch/
+
